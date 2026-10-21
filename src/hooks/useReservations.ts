@@ -1,13 +1,20 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, onSnapshot, updateDoc, deleteDoc, doc, query, where, getDoc, getDocs, setDoc, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Reservation } from '../types';
-import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
-import { format, addDays, parseISO } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { APP_CONFIG } from '../data/appConfig';
 import { getEffectiveOpeningHours } from '../lib/utils';
 import { useTenantSafe } from './useTenant';
+import { useAuth } from './useAuth';
 import { DEFAULT_RESTAURANT_ID } from '../services/tenantService';
+import { doesUserBelongToRestaurant, isUserSuperAdmin, normalizeTenantIdentifier, isCustomerRole } from '../lib/permissions';
+import {
+  doesReservationCountTowardsQuota,
+  calculateMonthlyBookingUsage,
+  isPackageFeatureEnabled,
+  MonthlyBookingUsageSummary,
+} from '../services/entitlementsService';
 
 const generateFriendlyId = (text: string) => {
   if (!text) return '';
@@ -29,20 +36,73 @@ export interface UseReservationsOptions {
 
 export function useReservations(options?: UseReservationsOptions) {
   const tenantCtx = useTenantSafe();
+  const { user } = useAuth();
   const activeRestaurant = tenantCtx?.tenant;
-  const isSuperAdmin = tenantCtx?.isSuperAdmin;
+  const isSuperAdmin = isUserSuperAdmin(user) || Boolean(tenantCtx?.isSuperAdmin);
 
-  // Resolve target restaurant ID: staff cannot override unless superadmin
+  const routeSlugMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/) : null;
+  const activeRouteSlug = routeSlugMatch && routeSlugMatch[1] ? normalizeTenantIdentifier(routeSlugMatch[1]) : null;
+  const isAdminOrStaffRoute = typeof window !== 'undefined' && (
+    window.location.pathname.includes('/admin') || window.location.pathname.includes('/staff')
+  );
+
+  // Resolve target restaurant ID strictly: staff/admins cannot override to another restaurant
   const targetRestaurantId = useMemo(() => {
-    if (options?.restaurantId && isSuperAdmin) return options.restaurantId;
-    if (activeRestaurant?.id) return activeRestaurant.id;
-    if (tenantCtx?.restaurantId) return tenantCtx.restaurantId;
-    if (typeof window !== 'undefined' && isSuperAdmin) {
-      const stored = localStorage.getItem('eata_active_restaurant_id') || localStorage.getItem('active_restaurant_id');
-      if (stored) return stored;
+    if (options?.restaurantId) {
+      const normOpt = normalizeTenantIdentifier(options.restaurantId);
+      if (isSuperAdmin || !user || isCustomerRole(user.role) || doesUserBelongToRestaurant(user, normOpt, activeRestaurant)) {
+        return normOpt;
+      }
+    }
+    if (activeRouteSlug) {
+      if (activeRestaurant && normalizeTenantIdentifier(activeRestaurant.slug) === activeRouteSlug) {
+        return normalizeTenantIdentifier(activeRestaurant.id);
+      }
+      return activeRouteSlug;
+    }
+    if (tenantCtx?.targetRestaurantId) {
+      return normalizeTenantIdentifier(tenantCtx.targetRestaurantId);
+    }
+    if (activeRestaurant?.id) {
+      return normalizeTenantIdentifier(activeRestaurant.id);
+    }
+    if (user && !isSuperAdmin && !isCustomerRole(user.role)) {
+      const userRest = user.restaurantId || (user.restaurantIds && user.restaurantIds[0]);
+      if (userRest) return normalizeTenantIdentifier(userRest);
     }
     return DEFAULT_RESTAURANT_ID;
-  }, [options?.restaurantId, activeRestaurant?.id, tenantCtx?.restaurantId, isSuperAdmin]);
+  }, [options?.restaurantId, activeRouteSlug, activeRestaurant, tenantCtx?.targetRestaurantId, isSuperAdmin, user]);
+
+  // Verify whether current user is authorized when on an admin/staff route
+  const isAuthorizedForCurrentContext = useMemo(() => {
+    if (!isAdminOrStaffRoute) return true; // Public booking or customer views
+    if (!user) return false;
+    if (isSuperAdmin) return true;
+    return doesUserBelongToRestaurant(user, targetRestaurantId, activeRestaurant);
+  }, [isAdminOrStaffRoute, user, isSuperAdmin, targetRestaurantId, activeRestaurant]);
+
+  const isDefaultTenant = useMemo(() => {
+    const norm = normalizeTenantIdentifier(targetRestaurantId);
+    return (norm === 'main' || norm === 'default-restaurant' || norm === 'dinemaster-bistro') &&
+      (!activeRouteSlug || activeRouteSlug === 'main' || activeRouteSlug === 'default-restaurant' || activeRouteSlug === 'dinemaster-bistro');
+  }, [targetRestaurantId, activeRouteSlug]);
+
+  const matchesTenant = useCallback((rRestId?: string | null) => {
+    const normR = normalizeTenantIdentifier(rRestId);
+    const normT = normalizeTenantIdentifier(targetRestaurantId);
+    if (!normR) return isDefaultTenant;
+    if (normR === normT) return true;
+    if (activeRouteSlug && normR === activeRouteSlug) return true;
+    if (activeRestaurant) {
+      if (normR === normalizeTenantIdentifier(activeRestaurant.id) || normR === normalizeTenantIdentifier(activeRestaurant.slug)) {
+        return true;
+      }
+    }
+    if (isDefaultTenant && (normR === 'main' || normR === 'default-restaurant' || normR === 'dinemaster-bistro')) {
+      return true;
+    }
+    return false;
+  }, [targetRestaurantId, activeRouteSlug, activeRestaurant, isDefaultTenant]);
 
   const [operationalRes, setOperationalRes] = useState<Reservation[]>([]);
   const [onDemandRes, setOnDemandRes] = useState<Reservation[]>([]);
@@ -52,15 +112,19 @@ export function useReservations(options?: UseReservationsOptions) {
   const tomorrowStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
   // 1. Continuous synchronization of today's and tomorrow's reservations (operational cache)
-  // Strictly filtered by restaurantId at the database query level
   useEffect(() => {
+    if (!isAuthorizedForCurrentContext) {
+      setOperationalRes([]);
+      setLoading(false);
+      return;
+    }
+
     const safetyTimer = setTimeout(() => {
       if (!options?.date && !options?.startDate && !options?.endDate && !options?.includeAll) {
         setLoading(false);
       }
     }, 1000);
 
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
     const q = query(
       collection(db, 'reservations'),
       where('date', 'in', [todayStr, tomorrowStr])
@@ -69,13 +133,8 @@ export function useReservations(options?: UseReservationsOptions) {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       clearTimeout(safetyTimer);
       const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
-        .filter(r => {
-          if (isDefault) {
-            return !r.restaurantId || r.restaurantId === DEFAULT_RESTAURANT_ID || r.restaurantId === 'main';
-          }
-          return r.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Reservation))
+        .filter(r => matchesTenant(r.restaurantId));
       setOperationalRes(data);
       if (!options?.date && !options?.startDate && !options?.endDate && !options?.includeAll) {
         setLoading(false);
@@ -90,13 +149,12 @@ export function useReservations(options?: UseReservationsOptions) {
       clearTimeout(safetyTimer);
       unsubscribe();
     };
-  }, [todayStr, tomorrowStr, targetRestaurantId, options?.date, options?.startDate, options?.endDate, options?.includeAll]);
+  }, [todayStr, tomorrowStr, targetRestaurantId, isAuthorizedForCurrentContext, matchesTenant, options?.date, options?.startDate, options?.endDate, options?.includeAll]);
 
   // 2. On-demand query based on requested date/range or includeAll option
-  // Strictly filtered by restaurantId at the database query level
   useEffect(() => {
     const hasOnDemand = options?.date || options?.startDate || options?.endDate || options?.includeAll;
-    if (!hasOnDemand) {
+    if (!hasOnDemand || !isAuthorizedForCurrentContext) {
       setOnDemandRes([]);
       return;
     }
@@ -106,9 +164,7 @@ export function useReservations(options?: UseReservationsOptions) {
       setLoading(false);
     }, 1200);
 
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
     let q;
-
     if (options?.includeAll) {
       q = query(collection(db, 'reservations'), limit(500));
     } else if (options?.startDate && options?.endDate) {
@@ -132,13 +188,8 @@ export function useReservations(options?: UseReservationsOptions) {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       clearTimeout(onDemandTimer);
       const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
-        .filter(r => {
-          if (isDefault) {
-            return !r.restaurantId || r.restaurantId === DEFAULT_RESTAURANT_ID || r.restaurantId === 'main';
-          }
-          return r.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Reservation))
+        .filter(r => matchesTenant(r.restaurantId));
       setOnDemandRes(data);
       setLoading(false);
     }, (error) => {
@@ -151,15 +202,16 @@ export function useReservations(options?: UseReservationsOptions) {
       clearTimeout(onDemandTimer);
       unsubscribe();
     };
-  }, [targetRestaurantId, options?.date, options?.startDate, options?.endDate, options?.includeAll]);
+  }, [targetRestaurantId, isAuthorizedForCurrentContext, matchesTenant, options?.date, options?.startDate, options?.endDate, options?.includeAll]);
 
   // Combine both arrays, removing duplicates by reservation ID
   const reservations = useMemo(() => {
+    if (!isAuthorizedForCurrentContext) return [];
     const mergedMap = new Map<string, Reservation>();
     operationalRes.forEach(r => mergedMap.set(r.id, r));
     onDemandRes.forEach(r => mergedMap.set(r.id, r));
     return Array.from(mergedMap.values());
-  }, [operationalRes, onDemandRes]);
+  }, [operationalRes, onDemandRes, isAuthorizedForCurrentContext]);
 
   const activeReservations = reservations.filter(r => !r.isDeleted && !r.isHistory && r.status !== 'history');
   const deletedReservations = reservations.filter(r => r.isDeleted && !r.isHistory && r.status !== 'history');
@@ -172,6 +224,9 @@ export function useReservations(options?: UseReservationsOptions) {
       const tableSnap = await getDoc(tableRef);
       if (tableSnap.exists()) {
         const tableData = tableSnap.data();
+        if (tableData.restaurantId && !matchesTenant(tableData.restaurantId)) {
+          return;
+        }
         const blockedDates = { ...(tableData.blockedDates || {}) };
         const dateRecord = { ...(blockedDates[res.date] || {}) };
         
@@ -214,6 +269,34 @@ export function useReservations(options?: UseReservationsOptions) {
   };
 
   const addReservation = async (reservation: Omit<Reservation, 'id'>) => {
+    if (isAdminOrStaffRoute && !isAuthorizedForCurrentContext) {
+      throw new Error('Access denied: You are not authorized to create reservations for this restaurant.');
+    }
+
+    // 1. Enforce Waitlist feature entitlement
+    if (reservation.status === 'waiting-list') {
+      if (!isPackageFeatureEnabled(tenantCtx?.entitlements, 'waitlist')) {
+        throw new Error(
+          'Waitlist Management is not included in your restaurant\'s current subscription package. Please upgrade your package to enable waitlists.'
+        );
+      }
+    }
+
+    // 2. Enforce Monthly Bookings package allowance for qualifying bookings
+    if (doesReservationCountTowardsQuota(reservation)) {
+      const usage = calculateMonthlyBookingUsage(
+        reservations,
+        tenantCtx?.entitlements,
+        tenantCtx?.tenant?.subscription,
+        reservation.date ? new Date(reservation.date) : new Date()
+      );
+      if (usage.isAtLimit) {
+        throw new Error(
+          `Monthly booking quota of ${usage.limit} reservations reached for the current billing period (${usage.periodStart} to ${usage.periodEnd}). Please upgrade your subscription package to allow additional bookings.`
+        );
+      }
+    }
+
     let enableBookingNumber = true;
     let restaurantName = APP_CONFIG.appName;
     let bookingNumberPrefix = '';
@@ -271,10 +354,8 @@ export function useReservations(options?: UseReservationsOptions) {
 
       let nextNum = 1;
       try {
-        const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-        
         let q;
-        if (isDefault) {
+        if (isDefaultTenant) {
           q = query(
             collection(db, 'reservations'),
             where('date', '>=', `${year}-01-01`),
@@ -291,12 +372,9 @@ export function useReservations(options?: UseReservationsOptions) {
         
         const querySnapshot = await getDocs(q);
         let maxNum = 0;
-        querySnapshot.forEach((doc) => {
-          const data = doc.data() as any;
-          const matchesTenant = isDefault
-            ? (!data.restaurantId || data.restaurantId === DEFAULT_RESTAURANT_ID || data.restaurantId === 'main')
-            : data.restaurantId === targetRestaurantId;
-          if (!matchesTenant) return;
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          if (!matchesTenant(data.restaurantId)) return;
           if (bookingNumberResetDate && data.createdAt && data.createdAt < bookingNumberResetDate) {
             return;
           }
@@ -318,12 +396,9 @@ export function useReservations(options?: UseReservationsOptions) {
       bookingNumber = `${prefix}-RES-${month}-${yearLastTwo}-${String(nextNum).padStart(6, '0')}`;
     }
 
-    // Schedule reminder for 24h before
-    let reminderEmail = { scheduled: false, scheduledFor: null, sent: false };
+    let reminderEmail = { scheduled: false, scheduledFor: null as string | null, sent: false };
     if (reservation.date && reservation.time) {
        try {
-         // Naive 24h calculation in local time (frontend)
-         // Assuming reservation.date is YYYY-MM-DD and time is HH:mm
          const resDate = new Date(`${reservation.date}T${reservation.time}:00`);
          const reminderDate = new Date(resDate.getTime() - 24 * 60 * 60 * 1000);
          reminderEmail = {
@@ -341,7 +416,6 @@ export function useReservations(options?: UseReservationsOptions) {
     );
     cleanReservation.reminderEmail = reminderEmail;
 
-
     let friendlyId = 'res-' + reservation.date + '-' + (reservation.customerName ? generateFriendlyId(reservation.customerName).substring(0, 15) : 'walkin');
     friendlyId += '-' + Math.random().toString(36).substring(2, 6);
 
@@ -356,6 +430,10 @@ export function useReservations(options?: UseReservationsOptions) {
   };
 
   const updateReservation = async (id: string, reservation: Partial<Reservation>) => {
+    if (isAdminOrStaffRoute && !isAuthorizedForCurrentContext) {
+      throw new Error('Access denied: You are not authorized to update reservations for this restaurant.');
+    }
+
     // IDOR Protection: verify reservation belongs to current restaurant
     let res = reservations.find(r => r.id === id);
     
@@ -377,15 +455,41 @@ export function useReservations(options?: UseReservationsOptions) {
     }
 
     if (res) {
-      const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-      const matchesTenant = isDefault ? true : (!res.restaurantId || res.restaurantId === targetRestaurantId);
-      
-      if (!matchesTenant && !isEmailUpdateOnly) {
+      if (!matchesTenant(res.restaurantId) && !isEmailUpdateOnly) {
         throw new Error(`Unauthorized: Reservation ${id} does not belong to the current restaurant.`);
       }
     }
 
     const { id: _, ...data } = reservation as any;
+
+    // Enforce Waitlist feature entitlement on update
+    if (data.status === 'waiting-list') {
+      if (!isPackageFeatureEnabled(tenantCtx?.entitlements, 'waitlist')) {
+        throw new Error(
+          'Waitlist Management is not included in your restaurant\'s current subscription package. Please upgrade your package to enable waitlists.'
+        );
+      }
+    }
+
+    // Enforce Monthly Bookings package allowance if transitioning from non-qualifying to qualifying status
+    if (
+      res &&
+      !doesReservationCountTowardsQuota(res) &&
+      data.status &&
+      doesReservationCountTowardsQuota({ ...res, ...data })
+    ) {
+      const usage = calculateMonthlyBookingUsage(
+        reservations,
+        tenantCtx?.entitlements,
+        tenantCtx?.tenant?.subscription,
+        (data.date || res.date) ? new Date(data.date || res.date) : new Date()
+      );
+      if (usage.isAtLimit) {
+        throw new Error(
+          `Monthly booking quota of ${usage.limit} reservations reached for the current billing period (${usage.periodStart} to ${usage.periodEnd}). Please upgrade your subscription package to allow additional bookings.`
+        );
+      }
+    }
     
     if (res && data.status === 'cancelled') {
       await autoUnblockTable(res);
@@ -420,7 +524,6 @@ export function useReservations(options?: UseReservationsOptions) {
     const cleanData = Object.fromEntries(
       Object.entries(data).filter(([_, v]) => v !== undefined)
     );
-    // Only set restaurantId if not an email-only or status-only update, to satisfy strict security rules
     if (!isEmailUpdateOnly && data.status !== 'cancelled' && !res?.restaurantId) {
       cleanData.restaurantId = targetRestaurantId;
     }
@@ -429,8 +532,11 @@ export function useReservations(options?: UseReservationsOptions) {
   };
 
   const deleteReservation = async (id: string, soft: boolean = true) => {
+    if (!isAuthorizedForCurrentContext) {
+      throw new Error('Access denied: You are not authorized to delete reservations for this restaurant.');
+    }
     const res = reservations.find(r => r.id === id);
-    if (!res) {
+    if (!res || !matchesTenant(res.restaurantId)) {
       throw new Error(`Unauthorized: Reservation ${id} does not belong to the current restaurant.`);
     }
     await autoUnblockTable(res);
@@ -442,58 +548,76 @@ export function useReservations(options?: UseReservationsOptions) {
   };
 
   const restoreReservation = async (id: string) => {
+    if (!isAuthorizedForCurrentContext) {
+      throw new Error('Access denied.');
+    }
     const res = reservations.find(r => r.id === id);
-    if (!res) {
+    if (!res || !matchesTenant(res.restaurantId)) {
       throw new Error(`Unauthorized: Reservation ${id} does not belong to the current restaurant.`);
     }
     await updateDoc(doc(db, 'reservations', id), { isDeleted: false, isHistory: false });
   };
 
   const bulkRestoreReservations = async (ids: string[]) => {
+    if (!isAuthorizedForCurrentContext) throw new Error('Access denied.');
     await Promise.all(ids.map(id => {
       const res = reservations.find(r => r.id === id);
-      if (!res) throw new Error(`Unauthorized reservation ${id}`);
+      if (!res || !matchesTenant(res.restaurantId)) throw new Error(`Unauthorized reservation ${id}`);
       return updateDoc(doc(db, 'reservations', id), { isDeleted: false, isHistory: false });
     }));
   };
 
   const moveToHistoryReservation = async (id: string) => {
+    if (!isAuthorizedForCurrentContext) throw new Error('Access denied.');
     const res = reservations.find(r => r.id === id);
-    if (!res) {
+    if (!res || !matchesTenant(res.restaurantId)) {
       throw new Error(`Unauthorized: Reservation ${id} does not belong to the current restaurant.`);
     }
     await updateDoc(doc(db, 'reservations', id), { isHistory: true });
   };
 
   const bulkMoveToHistoryReservations = async (ids: string[]) => {
+    if (!isAuthorizedForCurrentContext) throw new Error('Access denied.');
     await Promise.all(ids.map(id => {
       const res = reservations.find(r => r.id === id);
-      if (!res) throw new Error(`Unauthorized reservation ${id}`);
+      if (!res || !matchesTenant(res.restaurantId)) throw new Error(`Unauthorized reservation ${id}`);
       return updateDoc(doc(db, 'reservations', id), { isHistory: true });
     }));
   };
 
   const forceDeleteReservation = async (id: string) => {
+    if (!isAuthorizedForCurrentContext) throw new Error('Access denied.');
     const res = reservations.find(r => r.id === id);
-    if (!res) {
+    if (!res || !matchesTenant(res.restaurantId)) {
       throw new Error(`Unauthorized: Reservation ${id} does not belong to the current restaurant.`);
     }
     await deleteDoc(doc(db, 'reservations', id));
   };
 
   const bulkForceDeleteReservations = async (ids: string[]) => {
+    if (!isAuthorizedForCurrentContext) throw new Error('Access denied.');
     await Promise.all(ids.map(id => {
       const res = reservations.find(r => r.id === id);
-      if (!res) throw new Error(`Unauthorized reservation ${id}`);
+      if (!res || !matchesTenant(res.restaurantId)) throw new Error(`Unauthorized reservation ${id}`);
       return deleteDoc(doc(db, 'reservations', id));
     }));
   };
+
+  // Live booking usage for current tenant and billing cycle
+  const bookingUsage: MonthlyBookingUsageSummary = useMemo(() => {
+    return calculateMonthlyBookingUsage(
+      reservations,
+      tenantCtx?.entitlements,
+      tenantCtx?.tenant?.subscription
+    );
+  }, [reservations, tenantCtx?.entitlements, tenantCtx?.tenant?.subscription]);
 
   return { 
     reservations: activeReservations, 
     allReservations: reservations,
     deletedReservations, 
     loading, 
+    bookingUsage,
     addReservation, 
     updateReservation, 
     deleteReservation, 
@@ -506,4 +630,3 @@ export function useReservations(options?: UseReservationsOptions) {
     historyReservations
   };
 }
-

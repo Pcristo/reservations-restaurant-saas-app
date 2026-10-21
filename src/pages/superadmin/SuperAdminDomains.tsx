@@ -22,9 +22,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { format, parseISO } from 'date-fns';
+import { useFeatureFlags } from '../../services/featureFlagsService';
 
 export const SuperAdminDomains: React.FC = () => {
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const customDomainsEnabled = isFeatureEnabled('custom_domains');
   const [domains, setDomains] = useState<DomainRecord[]>([]);
   const [restaurants, setRestaurants] = useState<Record<string, Restaurant>>({});
   const [loading, setLoading] = useState(true);
@@ -121,6 +124,20 @@ export const SuperAdminDomains: React.FC = () => {
           <span>Refresh All</span>
         </button>
       </div>
+
+      {!customDomainsEnabled && (
+        <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <div className="text-xs font-bold text-amber-300">Custom Domain Ingress Feature Flag is Disabled</div>
+              <p className="text-xs text-amber-200/80 mt-0.5">
+                Tenant custom domain resolution and new domain registrations are currently paused platform-wide. Enable &ldquo;Custom Domain Ingress &amp; SSL&rdquo; in Feature Flags to resume routing.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Info Card: SaaS Ingress Target */}
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

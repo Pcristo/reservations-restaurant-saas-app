@@ -1,10 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, updateDoc, deleteDoc, doc, setDoc, query, where, getDoc } from 'firebase/firestore';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { collection, onSnapshot, updateDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Table, Area } from '../types';
-import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useTenantSafe } from './useTenant';
+import { useAuth } from './useAuth';
 import { DEFAULT_RESTAURANT_ID } from '../services/tenantService';
+import { canManageRestaurant, doesUserBelongToRestaurant, isUserSuperAdmin, normalizeTenantIdentifier, isCustomerRole } from '../lib/permissions';
+import {
+  checkCanCreateResource,
+  ResourceCreationCheckResult,
+} from '../services/entitlementsService';
 
 const generateFriendlyId = (text: string) => {
   if (!text) return '';
@@ -31,20 +36,62 @@ export const DEFAULT_AREAS: Area[] = [
 
 export function useTables(restaurantIdOverride?: string) {
   const tenantCtx = useTenantSafe();
+  const { user } = useAuth();
   const activeRestaurant = tenantCtx?.tenant;
-  const isSuperAdmin = tenantCtx?.isSuperAdmin;
+  const isSuperAdmin = isUserSuperAdmin(user) || Boolean(tenantCtx?.isSuperAdmin);
 
-  // Resolve target restaurant ID: staff cannot override unless superadmin
+  const routeSlugMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/) : null;
+  const activeRouteSlug = routeSlugMatch && routeSlugMatch[1] ? normalizeTenantIdentifier(routeSlugMatch[1]) : null;
+
+  // Resolve target restaurant ID strictly
   const targetRestaurantId = useMemo(() => {
-    if (restaurantIdOverride && isSuperAdmin) return restaurantIdOverride;
-    if (activeRestaurant?.id) return activeRestaurant.id;
-    if (tenantCtx?.restaurantId) return tenantCtx.restaurantId;
-    if (typeof window !== 'undefined' && isSuperAdmin) {
-      const stored = localStorage.getItem('eata_active_restaurant_id') || localStorage.getItem('active_restaurant_id');
-      if (stored) return stored;
+    if (restaurantIdOverride) {
+      const normOpt = normalizeTenantIdentifier(restaurantIdOverride);
+      if (isSuperAdmin || !user || isCustomerRole(user.role) || doesUserBelongToRestaurant(user, normOpt, activeRestaurant)) {
+        return normOpt;
+      }
+    }
+    if (activeRouteSlug) {
+      if (activeRestaurant && normalizeTenantIdentifier(activeRestaurant.slug) === activeRouteSlug) {
+        return normalizeTenantIdentifier(activeRestaurant.id);
+      }
+      return activeRouteSlug;
+    }
+    if (tenantCtx?.targetRestaurantId) {
+      return normalizeTenantIdentifier(tenantCtx.targetRestaurantId);
+    }
+    if (activeRestaurant?.id) {
+      return normalizeTenantIdentifier(activeRestaurant.id);
+    }
+    if (user && !isSuperAdmin && !isCustomerRole(user.role)) {
+      const userRest = user.restaurantId || (user.restaurantIds && user.restaurantIds[0]);
+      if (userRest) return normalizeTenantIdentifier(userRest);
     }
     return DEFAULT_RESTAURANT_ID;
-  }, [restaurantIdOverride, activeRestaurant?.id, tenantCtx?.restaurantId, isSuperAdmin]);
+  }, [restaurantIdOverride, activeRouteSlug, activeRestaurant, tenantCtx?.targetRestaurantId, isSuperAdmin, user]);
+
+  const isDefaultTenant = useMemo(() => {
+    const norm = normalizeTenantIdentifier(targetRestaurantId);
+    return (norm === 'main' || norm === 'default-restaurant' || norm === 'dinemaster-bistro') &&
+      (!activeRouteSlug || activeRouteSlug === 'main' || activeRouteSlug === 'default-restaurant' || activeRouteSlug === 'dinemaster-bistro');
+  }, [targetRestaurantId, activeRouteSlug]);
+
+  const matchesTenant = useCallback((itemRestId?: string | null) => {
+    const normI = normalizeTenantIdentifier(itemRestId);
+    const normT = normalizeTenantIdentifier(targetRestaurantId);
+    if (!normI) return isDefaultTenant;
+    if (normI === normT) return true;
+    if (activeRouteSlug && normI === activeRouteSlug) return true;
+    if (activeRestaurant) {
+      if (normI === normalizeTenantIdentifier(activeRestaurant.id) || normI === normalizeTenantIdentifier(activeRestaurant.slug)) {
+        return true;
+      }
+    }
+    if (isDefaultTenant && (normI === 'main' || normI === 'default-restaurant' || normI === 'dinemaster-bistro')) {
+      return true;
+    }
+    return false;
+  }, [targetRestaurantId, activeRouteSlug, activeRestaurant, isDefaultTenant]);
 
   const tablesCacheKey = `cached_tables_${targetRestaurantId}`;
   const areasCacheKey = `cached_areas_${targetRestaurantId}`;
@@ -86,7 +133,6 @@ export function useTables(restaurantIdOverride?: string) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // When target restaurant ID changes, reload from cache immediately
     try {
       const cachedT = localStorage.getItem(tablesCacheKey) || (targetRestaurantId === DEFAULT_RESTAURANT_ID ? localStorage.getItem('cached_tables') : null);
       setTables(cachedT ? JSON.parse(cachedT) : []);
@@ -98,21 +144,14 @@ export function useTables(restaurantIdOverride?: string) {
     let tablesLoaded = false;
     let areasLoaded = false;
 
-    // Database query-level tenant isolation: never query all tables across tenants
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    const tablesQuery = isDefault
+    const tablesQuery = isDefaultTenant
       ? query(collection(db, 'tables'))
       : query(collection(db, 'tables'), where('restaurantId', '==', targetRestaurantId));
 
     const unsubscribeTables = onSnapshot(tablesQuery, (snapshot) => {
       const tenantTables = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Table))
-        .filter(t => {
-          if (isDefault) {
-            return !t.restaurantId || t.restaurantId === DEFAULT_RESTAURANT_ID || t.restaurantId === 'main';
-          }
-          return t.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Table))
+        .filter(t => matchesTenant(t.restaurantId));
 
       if (tenantTables.length > 0) {
         setTables(tenantTables);
@@ -131,19 +170,14 @@ export function useTables(restaurantIdOverride?: string) {
       console.warn('[useTables] Notice on tables sync:', error);
     });
 
-    const areasQuery = isDefault
+    const areasQuery = isDefaultTenant
       ? query(collection(db, 'areas'))
       : query(collection(db, 'areas'), where('restaurantId', '==', targetRestaurantId));
 
     const unsubscribeAreas = onSnapshot(areasQuery, (snapshot) => {
       const tenantAreas = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Area))
-        .filter(a => {
-          if (isDefault) {
-            return !a.restaurantId || a.restaurantId === DEFAULT_RESTAURANT_ID || a.restaurantId === 'main';
-          }
-          return a.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Area))
+        .filter(a => matchesTenant(a.restaurantId));
       tenantAreas.sort((a, b) => (a.order || 0) - (b.order || 0));
 
       if (tenantAreas.length > 0) {
@@ -168,9 +202,33 @@ export function useTables(restaurantIdOverride?: string) {
       unsubscribeTables();
       unsubscribeAreas();
     };
-  }, [targetRestaurantId, tablesCacheKey, areasCacheKey]);
+  }, [targetRestaurantId, isDefaultTenant, matchesTenant, tablesCacheKey, areasCacheKey, defaultTenantTables, defaultTenantAreas]);
+
+  // Effective table limit check for the current subscription package
+  const activeTablesCount = tables.length;
+  const tableLimitCheck: ResourceCreationCheckResult = useMemo(() => {
+    return checkCanCreateResource(tenantCtx?.entitlements, 'tables', tables.length);
+  }, [tenantCtx?.entitlements, tables.length]);
+
+  const assertCanMutateTables = () => {
+    if (!doesUserBelongToRestaurant(user, targetRestaurantId, activeRestaurant)) {
+      throw new Error('Access denied: You are not authorized to modify tables or areas for this restaurant.');
+    }
+  };
 
   const addTable = async (table: Omit<Table, 'id'>) => {
+    assertCanMutateTables();
+
+    // Enforce subscription package table limit
+    const limitCheck = checkCanCreateResource(tenantCtx?.entitlements, 'tables', tables.length);
+    if (!limitCheck.allowed) {
+      throw new Error(
+        limitCheck.reasonPt ||
+        limitCheck.reason ||
+        'Dining table limit reached for your subscription package. Please upgrade your package to add more tables.'
+      );
+    }
+
     let friendlyId = 'table-' + generateFriendlyId(table.name || '');
     if (friendlyId === 'table-') friendlyId = 'table-' + Date.now();
     friendlyId += '-' + Math.random().toString(36).substring(2, 6);
@@ -183,9 +241,9 @@ export function useTables(restaurantIdOverride?: string) {
   };
 
   const updateTable = async (id: string, table: Partial<Table>) => {
-    // IDOR Protection: verify table belongs to this restaurant
+    assertCanMutateTables();
     const existing = tables.find(t => t.id === id);
-    if (!existing) {
+    if (!existing || (existing.restaurantId && !matchesTenant(existing.restaurantId))) {
       throw new Error(`Unauthorized: Table ${id} does not belong to the current restaurant.`);
     }
     const { id: _, ...data } = table as any;
@@ -196,15 +254,20 @@ export function useTables(restaurantIdOverride?: string) {
   };
 
   const deleteTable = async (id: string) => {
-    // IDOR Protection: verify table belongs to this restaurant
+    if (!canManageRestaurant(user, targetRestaurantId, activeRestaurant)) {
+      throw new Error('Access denied: Only restaurant administrators can delete tables.');
+    }
     const existing = tables.find(t => t.id === id);
-    if (!existing) {
+    if (!existing || (existing.restaurantId && !matchesTenant(existing.restaurantId))) {
       throw new Error(`Unauthorized: Table ${id} does not belong to the current restaurant.`);
     }
     await deleteDoc(doc(db, 'tables', id));
   };
 
   const addArea = async (area: Omit<Area, 'id'>) => {
+    if (!canManageRestaurant(user, targetRestaurantId, activeRestaurant)) {
+      throw new Error('Access denied: Only restaurant administrators can add dining areas.');
+    }
     let friendlyId = generateFriendlyId(area.name || '');
     if (!friendlyId) friendlyId = 'area-' + Date.now();
     friendlyId += '-' + Math.random().toString(36).substring(2, 6);
@@ -216,9 +279,11 @@ export function useTables(restaurantIdOverride?: string) {
   };
 
   const updateArea = async (id: string, area: Partial<Area>) => {
-    // IDOR Protection: verify area belongs to this restaurant
+    if (!canManageRestaurant(user, targetRestaurantId, activeRestaurant)) {
+      throw new Error('Access denied: Only restaurant administrators can update dining areas.');
+    }
     const existing = areas.find(a => a.id === id);
-    if (!existing) {
+    if (!existing || (existing.restaurantId && !matchesTenant(existing.restaurantId))) {
       throw new Error(`Unauthorized: Area ${id} does not belong to the current restaurant.`);
     }
     const { id: _, ...data } = area as any;
@@ -229,14 +294,28 @@ export function useTables(restaurantIdOverride?: string) {
   };
 
   const deleteArea = async (id: string) => {
-    // IDOR Protection: verify area belongs to this restaurant
+    if (!canManageRestaurant(user, targetRestaurantId, activeRestaurant)) {
+      throw new Error('Access denied: Only restaurant administrators can delete dining areas.');
+    }
     const existing = areas.find(a => a.id === id);
-    if (!existing) {
+    if (!existing || (existing.restaurantId && !matchesTenant(existing.restaurantId))) {
       throw new Error(`Unauthorized: Area ${id} does not belong to the current restaurant.`);
     }
     await deleteDoc(doc(db, 'areas', id));
   };
 
-  return { tables, areas, loading, addTable, updateTable, deleteTable, addArea, updateArea, deleteArea, restaurantId: targetRestaurantId };
+  return {
+    tables,
+    areas,
+    loading,
+    activeTablesCount,
+    tableLimitCheck,
+    addTable,
+    updateTable,
+    deleteTable,
+    addArea,
+    updateArea,
+    deleteArea,
+    restaurantId: targetRestaurantId,
+  };
 }
-

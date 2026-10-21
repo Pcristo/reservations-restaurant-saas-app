@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../hooks/useAuth';
@@ -8,11 +8,11 @@ import { useSettings } from '../hooks/useSettings';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { Reservation, DEFAULT_RESTAURANT_ID } from '../types';
+import { doesUserBelongToRestaurant, normalizeTenantIdentifier } from '../lib/permissions';
 
 export const BookingNotificationListener: React.FC = () => {
-  const { isStaff, isAdmin } = useAuth();
+  const { user, isStaff, isAdmin, isSuperAdmin } = useAuth();
   const tenant = useTenantSafe();
-  const targetRestaurantId = tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
   const location = useLocation();
   const { setHasNewBookings, addNotificationBooking } = useNotifications();
   const { settings } = useSettings();
@@ -21,45 +21,52 @@ export const BookingNotificationListener: React.FC = () => {
   const listenerStartTime = useRef<number>(Date.now());
   const silentBellRef = useRef(false);
 
+  const targetRestaurantId = useMemo(() => {
+    const match = location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return normalizeTenantIdentifier(match[1]);
+    }
+    if (tenant?.targetRestaurantId) {
+      return normalizeTenantIdentifier(tenant.targetRestaurantId);
+    }
+    if (!isSuperAdmin && user?.restaurantId) {
+      return normalizeTenantIdentifier(user.restaurantId);
+    }
+    return '';
+  }, [location.pathname, tenant?.targetRestaurantId, isSuperAdmin, user?.restaurantId]);
+
   useEffect(() => {
     silentBellRef.current = !!settings?.silentBell;
   }, [settings?.silentBell]);
 
   useEffect(() => {
-    // Reset initial load flag when restaurant changes
     isInitialLoad.current = true;
-    // Record start time whenever the listener is established to avoid historical toasts
     listenerStartTime.current = Date.now();
     
-    // Initialize audio
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     audioRef.current.volume = 0.5;
 
-    // Only listen if staff or admin
+    // Only listen if staff or admin on management routes for their own restaurant
     if (!isStaff && !isAdmin) return;
-    if (!location.pathname.startsWith('/admin')) return;
+    const isManagementView =
+      location.pathname.startsWith('/admin') ||
+      location.pathname.includes('/admin') ||
+      location.pathname.includes('/staff');
+    if (!isManagementView || !targetRestaurantId) return;
 
-    // Filter to latest bookings with a simple single-field order by to avoid composite index crashes
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    let q;
-    if (isDefault) {
-      q = query(
-        collection(db, 'reservations'),
-        orderBy('createdAt', 'desc'),
-        limit(15)
-      );
-    } else {
-      q = query(
-        collection(db, 'reservations'),
-        where('restaurantId', '==', targetRestaurantId),
-        orderBy('createdAt', 'desc'),
-        limit(15)
-      );
+    if (!isSuperAdmin && !doesUserBelongToRestaurant(user, targetRestaurantId, tenant?.tenant)) {
+      return;
     }
 
+    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
+    const q = query(
+      collection(db, 'reservations'),
+      where('restaurantId', '==', targetRestaurantId),
+      orderBy('createdAt', 'desc'),
+      limit(15)
+    );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // The first fire of onSnapshot contains existing data.
-      // We skip it to avoid the "10 toasts on login" issue.
       if (isInitialLoad.current) {
         isInitialLoad.current = false;
         return;
@@ -70,44 +77,34 @@ export const BookingNotificationListener: React.FC = () => {
           const data = change.doc.data();
           const reservation = { id: change.doc.id, ...data } as Reservation;
           
-          // Check tenant match
+          const resRestId = normalizeTenantIdentifier(reservation.restaurantId);
           const isTenantMatch = isDefault
-            ? (!reservation.restaurantId || reservation.restaurantId === DEFAULT_RESTAURANT_ID || reservation.restaurantId === 'main')
-            : reservation.restaurantId === targetRestaurantId;
+            ? (resRestId === DEFAULT_RESTAURANT_ID || resRestId === 'main')
+            : resRestId === targetRestaurantId;
           if (!isTenantMatch) return;
 
-          // Only notify for public guest bookings
           if (reservation.source !== 'public') return;
           
-          // CRITICAL: Ensure we only notify for bookings created AFTER this session started.
-          // This provides a double-layer of protection against the flood.
           let createdAtMs = 0;
           if (data.createdAt) {
-            // Handle Firestore Timestamp object or Date string/Date object
             if (typeof data.createdAt.toMillis === 'function') {
               createdAtMs = data.createdAt.toMillis();
             } else {
               createdAtMs = new Date(data.createdAt).getTime();
             }
           } else {
-            // Fallback if createdAt is not yet set (local creation)
             createdAtMs = Date.now();
           }
 
-          // Only notify if created after we started listening (with a small buffer for server sync)
           if (createdAtMs > listenerStartTime.current - 5000) {
-            // Set new bookings flag
             setHasNewBookings(true);
             addNotificationBooking(reservation);
 
-            // Play sound
             if (audioRef.current && !silentBellRef.current) {
               audioRef.current.play().catch(err => console.error('Error playing notification sound:', err));
             }
 
-            // Show toast
             const dateStr = reservation.date;
-            // Format date to show day of week
             let dayName = '';
             try {
               const dateObj = new Date(dateStr);
@@ -136,7 +133,7 @@ export const BookingNotificationListener: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [isStaff, isAdmin, location.pathname, targetRestaurantId]);
+  }, [isStaff, isAdmin, isSuperAdmin, user, tenant?.tenant, location.pathname, targetRestaurantId]);
 
   return null;
 };

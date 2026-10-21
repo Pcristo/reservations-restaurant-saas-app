@@ -15,13 +15,15 @@ import { db } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { APP_CONFIG } from '../data/appConfig';
+import { useFeatureFlags } from '../services/featureFlagsService';
 
 export default function Navbar() {
-  const { user, logout, isAdmin, isStaff } = useAuth();
+  const { user, logout, isAdmin, isStaff, isSuperAdmin } = useAuth();
   const { settings } = useSettings();
   const tenant = useTenantSafe();
-  const targetRestaurantId = tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
   const { language, setLanguage, t } = useLanguage();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const multiLanguageEnabled = isFeatureEnabled('multi_language');
   const { hasNewBookings, setHasNewBookings, newBookingsList, clearNotificationBookings, removeNotificationBooking } = useNotifications();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -30,6 +32,21 @@ export default function Navbar() {
   const [isFetching, setIsFetching] = React.useState(false);
   const [exitPendingTarget, setExitPendingTarget] = React.useState<{ path?: string; action?: () => void; isLogout?: boolean } | null>(null);
   const location = useLocation();
+
+  const targetRestaurantId = React.useMemo(() => {
+    const match = location.pathname.match(/^\/r\/([^/?#]+)/);
+    if (match && match[1]) {
+      const raw = match[1].toLowerCase();
+      return raw === 'bella-italia' ? 'bela-italia' : raw;
+    }
+    if (tenant?.targetRestaurantId) {
+      return tenant.targetRestaurantId;
+    }
+    if (!isSuperAdmin && user?.restaurantId) {
+      return user.restaurantId;
+    }
+    return DEFAULT_RESTAURANT_ID;
+  }, [location.pathname, tenant?.targetRestaurantId, isSuperAdmin, user?.restaurantId]);
 
   const handleNavigationAttempt = (e: React.MouseEvent, targetPath?: string, action?: () => void) => {
     const isLogout = action !== undefined && targetPath === undefined;
@@ -72,35 +89,20 @@ export default function Navbar() {
   const smartAlertsCount = smartAlerts.length;
 
   React.useEffect(() => {
-    if (isPopupOpen && newBookingsList.length === 0) {
+    if (isPopupOpen && newBookingsList.length === 0 && targetRestaurantId) {
       const fetchRecentBookings = async () => {
         setIsFetching(true);
         try {
-          const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-          let q;
-          if (isDefault) {
-            q = query(
-              collection(db, 'reservations'),
-              orderBy('createdAt', 'desc'),
-              limit(25)
-            );
-          } else {
-            q = query(
-              collection(db, 'reservations'),
-              where('restaurantId', '==', targetRestaurantId),
-              orderBy('createdAt', 'desc'),
-              limit(25)
-            );
-          }
+          const q = query(
+            collection(db, 'reservations'),
+            where('restaurantId', '==', targetRestaurantId),
+            orderBy('createdAt', 'desc'),
+            limit(25)
+          );
           const snap = await getDocs(q);
           const list = snap.docs
             .map(doc => ({ id: doc.id, ...(doc.data() as object) } as Reservation))
-            .filter(r => {
-              const matchesTenant = isDefault
-                ? (!r.restaurantId || r.restaurantId === DEFAULT_RESTAURANT_ID || r.restaurantId === 'main')
-                : r.restaurantId === targetRestaurantId;
-              return matchesTenant && r.source === 'public';
-            })
+            .filter(r => r.restaurantId === targetRestaurantId && r.source === 'public')
             .slice(0, 5);
           setFetchedBookings(list);
         } catch (error) {
@@ -175,6 +177,9 @@ export default function Navbar() {
     ? `/r/${restaurantSlug}/login?role=customer&mode=signup` 
     : '/login?role=customer&mode=signup';
 
+  const isMasterAdminEmail = (user?.email || '').toLowerCase().trim() === 'pcristo35@gmail.com';
+  const hasSuperAdminPrivileges = isSuperAdmin || isMasterAdminEmail;
+
   const navLinks = [
     { name: t('nav.book'), path: restaurantBookingUrl, public: true },
     { name: t('nav.website'), path: settings?.websiteUrl || '#', public: true, external: true },
@@ -183,6 +188,7 @@ export default function Navbar() {
     { name: t('nav.live_view'), path: `${adminBase}/live`, admin: true, staff: true },
     { name: t('nav.reservations'), path: `${adminBase}/reservations`, admin: true, staff: true },
     { name: t('nav.customers'), path: `${adminBase}/customers`, admin: true, staff: true },
+    { name: 'Super Admin', path: '/app/super-admin', superAdmin: true },
   ];
 
   const filteredLinks = navLinks.filter(link => {
@@ -190,6 +196,7 @@ export default function Navbar() {
     if (link.path === restaurantBookingUrl && (isAdmin || isStaff)) return false;
     if (link.public) return true;
     if (link.customer && user?.role === 'customer') return true;
+    if (link.superAdmin && hasSuperAdminPrivileges) return true;
     if (link.admin && isAdmin) return true;
     if (link.staff && isStaff) return true;
     return false;
@@ -218,7 +225,7 @@ export default function Navbar() {
       {isAdmin && (
         <div className="bg-gray-900 text-gray-400 py-1.5 px-4 sm:px-6 lg:px-8 border-b border-gray-800">
           <div className={cn("mx-auto flex justify-between items-center gap-6 text-[10px] font-bold uppercase tracking-widest", settings?.containerWidth === '1480px' ? "w-full max-w-[1480px]" : "w-full max-w-[1267px]")}>
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
               {Boolean(
                 (settings?.maintenanceModeEnabled && (!restaurantSlug || settings.restaurantId === restaurantSlug || settings.id === restaurantSlug || tenant?.slug === restaurantSlug)) ||
                 (tenant?.tenant?.maintenanceModeEnabled && (!restaurantSlug || tenant?.slug === restaurantSlug || tenant?.targetRestaurantId === restaurantSlug || tenant?.tenant?.id === restaurantSlug))
@@ -230,6 +237,17 @@ export default function Navbar() {
                     <span className="text-[9px] font-mono opacity-80">(/r/{restaurantSlug})</span>
                   )}
                 </span>
+              )}
+              {hasSuperAdminPrivileges && (
+                <Link
+                  to="/app/super-admin"
+                  id="topbar-super-admin-link"
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500 hover:text-slate-950 transition-all font-bold text-[10px] normal-case tracking-normal shadow-sm"
+                  title="Platform Super Administrator Portal"
+                >
+                  <ShieldAlert size={12} className="text-amber-400" />
+                  <span>Super Admin Panel</span>
+                </Link>
               )}
             </div>
             <div className="flex items-center gap-6">
@@ -479,7 +497,7 @@ export default function Navbar() {
               </div>
             )}
 
-            {settings?.showLanguageSwitch !== false && (
+            {multiLanguageEnabled && settings?.showLanguageSwitch !== false && (
               <div className={cn(
                 "flex items-center rounded-lg p-1 ml-2 transition-colors duration-300",
                 settings?.theme === 'dark' ? "bg-gray-900 border border-gray-800" : "bg-gray-100 border border-gray-200"
@@ -514,6 +532,17 @@ export default function Navbar() {
             
             {user ? (
               <div className="flex items-center gap-2">
+                {hasSuperAdminPrivileges && (
+                  <Link
+                    to="/app/super-admin"
+                    id="btn-navbar-superadmin-action"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-sm transition-all cursor-pointer"
+                    title="Platform Super Administrator Portal"
+                  >
+                    <ShieldAlert size={14} className="text-slate-950" />
+                    <span>Super Admin</span>
+                  </Link>
+                )}
                 <button
                   onClick={(e) => handleNavigationAttempt(e, undefined, logout)}
                   className={cn(
@@ -696,7 +725,7 @@ export default function Navbar() {
               );
             })}
 
-            {settings?.showLanguageSwitch !== false && (
+            {multiLanguageEnabled && settings?.showLanguageSwitch !== false && (
               <div className="flex items-center gap-4 px-3 py-2">
                 <span className="text-sm font-medium text-gray-500 flex items-center gap-2">
                   <Globe size={16} /> {t('nav.language')}:

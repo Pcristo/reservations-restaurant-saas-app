@@ -5,6 +5,8 @@ import {
   submitPublicContactForm, 
   DEFAULT_MARKETING_SETTINGS 
 } from '../services/marketingWebsiteService';
+import { subscribeToPlans } from '../services/planService';
+import { formatResourceAllowance } from '../services/entitlementsService';
 import { MarketingWebsiteSettings, Plan } from '../types';
 import { 
   Sparkles, Check, ArrowRight, Shield, Calendar, Users, 
@@ -16,6 +18,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { MarketingSEOHead } from '../components/MarketingSEOHead';
 import { useLanguage } from '../hooks/useLanguage';
+import { useFeatureFlags } from '../services/featureFlagsService';
 import { cn } from '../lib/utils';
 import restaurantManagerVideo from '../assets/videos/restaurant_manager_video.mp4';
 import ZarcoFooter from '../components/extra/ZarcoFooterTemplate';
@@ -27,6 +30,8 @@ interface MarketingLandingPageProps {
 
 export default function MarketingLandingPage({ settings: initialSettings, initialSection }: MarketingLandingPageProps) {
   const { language, setLanguage } = useLanguage();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const multiLanguageEnabled = isFeatureEnabled('multi_language');
   const isPt = language === 'pt';
 
   const [settings, setSettings] = useState<MarketingWebsiteSettings>(initialSettings || DEFAULT_MARKETING_SETTINGS);
@@ -79,6 +84,14 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
     }).catch(() => {
       setIsLoadingPlans(false);
     });
+
+    const unsubscribePlans = subscribeToPlans((livePlans) => {
+      const visible = livePlans.filter((p) => p.isActive !== false && p.isPublic !== false);
+      setPlans(visible);
+      setIsLoadingPlans(false);
+    });
+
+    return () => unsubscribePlans();
   }, [initialSettings]);
 
   // Scroll to initial section if provided in route
@@ -488,37 +501,39 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
           {/* Right Action Buttons with Language Toggler */}
           <div className="hidden sm:flex items-center gap-3">
             {/* Language Switcher Toggler in Navbar */}
-            <div className="flex items-center rounded-xl p-1 bg-slate-900 border border-slate-800 shadow-inner gap-1">
-              <div className="pl-1.5 pr-0.5 text-slate-400 flex items-center">
-                <Globe size={13} className="text-amber-400" />
+            {multiLanguageEnabled && (
+              <div className="flex items-center rounded-xl p-1 bg-slate-900 border border-slate-800 shadow-inner gap-1">
+                <div className="pl-1.5 pr-0.5 text-slate-400 flex items-center">
+                  <Globe size={13} className="text-amber-400" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer",
+                    language === 'en'
+                      ? "bg-amber-500 text-slate-950 shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  )}
+                  title="English"
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('pt')}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer",
+                    language === 'pt'
+                      ? "bg-amber-500 text-slate-950 shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  )}
+                  title="Português"
+                >
+                  PT
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setLanguage('en')}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer",
-                  language === 'en'
-                    ? "bg-amber-500 text-slate-950 shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                )}
-                title="English"
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage('pt')}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer",
-                  language === 'pt'
-                    ? "bg-amber-500 text-slate-950 shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                )}
-                title="Português"
-              >
-                PT
-              </button>
-            </div>
+            )}
 
             <Link
               to="/login"
@@ -539,31 +554,33 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
           {/* Mobile Header Bar */}
           <div className="sm:hidden flex items-center gap-2">
             {/* Quick Mobile Language Toggler */}
-            <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800 gap-0.5">
-              <div className="pl-1 pr-0.5 text-slate-400 flex items-center">
-                <Globe size={11} className="text-amber-400" />
+            {multiLanguageEnabled && (
+              <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800 gap-0.5">
+                <div className="pl-1 pr-0.5 text-slate-400 flex items-center">
+                  <Globe size={11} className="text-amber-400" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={cn(
+                    "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
+                    language === 'en' ? "bg-amber-500 text-slate-950" : "text-slate-400"
+                  )}
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('pt')}
+                  className={cn(
+                    "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
+                    language === 'pt' ? "bg-amber-500 text-slate-950" : "text-slate-400"
+                  )}
+                >
+                  PT
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setLanguage('en')}
-                className={cn(
-                  "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
-                  language === 'en' ? "bg-amber-500 text-slate-950" : "text-slate-400"
-                )}
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage('pt')}
-                className={cn(
-                  "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
-                  language === 'pt' ? "bg-amber-500 text-slate-950" : "text-slate-400"
-                )}
-              >
-                PT
-              </button>
-            </div>
+            )}
 
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -623,37 +640,39 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             )}
 
             {/* Mobile Language Switcher Row */}
-            <div className="flex items-center justify-between py-2 border-t border-slate-800/80">
-              <span className="text-xs text-slate-400 font-medium">
-                {isPt ? 'Idioma da Plataforma' : 'Platform Language'}
-              </span>
-              <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setLanguage('en')}
-                  className={cn(
-                    "px-3 py-1 text-xs font-bold rounded-md transition-all",
-                    language === 'en'
-                      ? "bg-amber-500 text-slate-950 font-bold"
-                      : "text-slate-400 hover:text-white"
-                  )}
-                >
-                  English
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('pt')}
-                  className={cn(
-                    "px-3 py-1 text-xs font-bold rounded-md transition-all",
-                    language === 'pt'
-                      ? "bg-amber-500 text-slate-950 font-bold"
-                      : "text-slate-400 hover:text-white"
-                  )}
-                >
-                  Português
-                </button>
+            {multiLanguageEnabled && (
+              <div className="flex items-center justify-between py-2 border-t border-slate-800/80">
+                <span className="text-xs text-slate-400 font-medium">
+                  {isPt ? 'Idioma da Plataforma' : 'Platform Language'}
+                </span>
+                <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('en')}
+                    className={cn(
+                      "px-3 py-1 text-xs font-bold rounded-md transition-all",
+                      language === 'en'
+                        ? "bg-amber-500 text-slate-950 font-bold"
+                        : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('pt')}
+                    className={cn(
+                      "px-3 py-1 text-xs font-bold rounded-md transition-all",
+                      language === 'pt'
+                        ? "bg-amber-500 text-slate-950 font-bold"
+                        : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Português
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="pt-2 flex flex-col gap-2">
               <Link
@@ -1012,8 +1031,20 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                       <p className="text-xs text-slate-400 mt-1 min-h-[36px]">{getPlanDescription(p)}</p>
 
                       <div className="mt-5 mb-6">
-                        <span className="text-3xl sm:text-4xl font-extrabold text-white">€{p.priceMonthly}</span>
-                        <span className="text-xs text-slate-400">{isPt ? ' / mês' : ' / month'}</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl sm:text-4xl font-extrabold text-white">
+                            {p.priceMonthly === 0 ? (isPt ? 'Grátis' : 'Free') : `€${p.priceMonthly}`}
+                          </span>
+                          {p.priceMonthly > 0 && (
+                            <span className="text-xs text-slate-400">{isPt ? ' / mês' : ' / month'}</span>
+                          )}
+                        </div>
+                        {p.priceMonthly > 0 && (
+                          <div className="text-[11px] text-amber-400/90 font-medium mt-1">
+                            €{typeof p.priceAnnual === 'number' ? p.priceAnnual : Math.round(p.priceMonthly * 12 * 0.8)}
+                            {isPt ? ' / ano (faturação anual)' : ' / year (annual billing)'}
+                          </div>
+                        )}
                       </div>
 
                       {/* Entitlements List */}
@@ -1024,9 +1055,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                             {isPt ? 'Reservas Mensais' : 'Monthly Bookings'}
                           </span>
                           <span className="font-semibold text-white">
-                            {p.entitlements.maxReservations >= 99999 
-                              ? (isPt ? 'Ilimitado' : 'Unlimited') 
-                              : p.entitlements.maxReservations}
+                            {formatResourceAllowance(p.entitlements, 'bookings', isPt ? 'pt' : 'en')}
                           </span>
                         </div>
 
@@ -1036,9 +1065,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                             {isPt ? 'Contas de Staff' : 'Staff Accounts'}
                           </span>
                           <span className="font-semibold text-white">
-                            {p.entitlements.maxStaffUsers >= 900 
-                              ? (isPt ? 'Ilimitado' : 'Unlimited') 
-                              : p.entitlements.maxStaffUsers}
+                            {formatResourceAllowance(p.entitlements, 'staff', isPt ? 'pt' : 'en')}
                           </span>
                         </div>
 
@@ -1048,9 +1075,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                             {isPt ? 'Mesas de Refeição' : 'Max Dining Tables'}
                           </span>
                           <span className="font-semibold text-white">
-                            {p.entitlements.maxTables >= 900 
-                              ? (isPt ? 'Ilimitado' : 'Unlimited') 
-                              : p.entitlements.maxTables}
+                            {formatResourceAllowance(p.entitlements, 'tables', isPt ? 'pt' : 'en')}
                           </span>
                         </div>
 

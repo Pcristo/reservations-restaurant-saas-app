@@ -1,22 +1,19 @@
 import { jsonResponse, errorResponse } from '../../lib/response';
-import { 
-  getDocById, 
-  getRestaurantMeta 
-} from '../../lib/billingServiceBackend';
-import { saveFirestoreDocRest } from '../../lib/firebaseAdmin';
-import { DEFAULT_PLANS } from '../../lib/plans';
-import { RestaurantSubscription, Invoice, BillingFrequency } from '../../../src/types';
+import { getDocById, getRestaurantMeta } from '../../lib/billingServiceBackend';
+import { saveFirestoreDocRest, getFirestoreDocRest } from '../../lib/firebaseAdmin';
+import { DEFAULT_PLANS, normalizePlan } from '../../lib/plans';
+import { RestaurantSubscription, Invoice, BillingFrequency, Plan } from '../../../src/types';
 import { APP_CONFIG } from '../../lib/appConfig';
 
 export async function onRequestPost(context: any) {
   try {
     const body = await context.request.json().catch(() => ({}));
     const env = context.env || {};
-    const { 
-      restaurantId, 
-      planId, 
+    const {
+      restaurantId,
+      planId,
       billingFrequency = 'monthly',
-      actor 
+      actor,
     } = body;
 
     if (!restaurantId || !planId) {
@@ -26,22 +23,35 @@ export async function onRequestPost(context: any) {
     const cleanRestaurantId = restaurantId.toLowerCase().trim();
     const cleanPlanId = planId.toLowerCase().trim();
 
-    // 1. Verify target plan exists
-    const targetPlan = DEFAULT_PLANS.find(p => p.id === cleanPlanId);
+    // 1. Verify target plan exists in Firestore plans collection or DEFAULT_PLANS
+    let targetPlan: Plan | undefined;
+    const dbPlanDoc = await getFirestoreDocRest('plans', cleanPlanId, env);
+    if (dbPlanDoc) {
+      targetPlan = normalizePlan({ ...dbPlanDoc, id: cleanPlanId }, cleanPlanId);
+    } else {
+      const fallback = DEFAULT_PLANS.find((p) => p.id.toLowerCase() === cleanPlanId);
+      if (fallback) {
+        targetPlan = normalizePlan(fallback, fallback.id);
+      }
+    }
+
     if (!targetPlan) {
       return errorResponse(`Invalid plan: ${planId}`, 400);
     }
 
     // 2. Fetch existing subscription
     const subId = `sub-${cleanRestaurantId}`;
-    let sub: RestaurantSubscription = await getDocById('subscriptions', subId, env);
+    const sub: RestaurantSubscription = await getDocById('subscriptions', subId, env);
 
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
 
     const priceMonthly = targetPlan.priceMonthly;
-    const priceAnnual = Math.round(priceMonthly * 12 * 0.8);
+    const priceAnnual =
+      typeof targetPlan.priceAnnual === 'number'
+        ? targetPlan.priceAnnual
+        : Math.round(priceMonthly * 12 * 0.8);
     const isAnnual = billingFrequency === 'annual';
     const newPrice = isAnnual ? priceAnnual : priceMonthly;
 
@@ -78,12 +88,17 @@ export async function onRequestPost(context: any) {
 
     await saveFirestoreDocRest('subscriptions', subId, updatedSub, env);
 
-    // 3. Update restaurant document planId & planName
-    await saveFirestoreDocRest('restaurants', cleanRestaurantId, {
-      planId: targetPlan.id,
-      planName: targetPlan.name,
-      updatedAt: now.toISOString(),
-    }, env);
+    // 3. Update restaurant document planId & planName (preserve existing tables/staff/bookings safely on downgrade)
+    await saveFirestoreDocRest(
+      'restaurants',
+      cleanRestaurantId,
+      {
+        planId: targetPlan.id,
+        planName: targetPlan.name,
+        updatedAt: now.toISOString(),
+      },
+      env
+    );
 
     // 4. Generate an invoice for the plan change if price > 0
     let createdInvoice: Invoice | null = null;
@@ -116,7 +131,7 @@ export async function onRequestPost(context: any) {
         taxAmount,
         total,
         currency: targetPlan.currency || 'EUR',
-        status: 'paid', // Mark paid immediately if card on file or updated
+        status: 'paid',
         paidAt: now.toISOString(),
         paymentMethodDescription: 'Visa ending in 4242',
         transactionReference: `tx_dmp_${Date.now()}`,
@@ -129,7 +144,7 @@ export async function onRequestPost(context: any) {
             quantity: 1,
             unitPrice: subtotal,
             amount: subtotal,
-          }
+          },
         ],
         createdAt: now.toISOString(),
         updatedAt: now.toISOString(),
@@ -138,39 +153,48 @@ export async function onRequestPost(context: any) {
       await saveFirestoreDocRest('invoices', invoice.id, invoice, env);
       createdInvoice = invoice;
 
-      // Record transaction
-      await saveFirestoreDocRest('transactions', `tx-${invoice.id}`, {
-        id: `tx-${invoice.id}`,
-        restaurantId: cleanRestaurantId,
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        amount: total,
-        currency: invoice.currency,
-        status: 'succeeded',
-        paymentMethod: 'Visa •••• 4242',
-        providerReference: invoice.transactionReference,
-        description: `Plan upgraded to ${targetPlan.name}`,
-        date: now.toISOString(),
-        createdAt: now.toISOString(),
-      }, env);
+      await saveFirestoreDocRest(
+        'transactions',
+        `tx-${invoice.id}`,
+        {
+          id: `tx-${invoice.id}`,
+          restaurantId: cleanRestaurantId,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          amount: total,
+          currency: invoice.currency,
+          status: 'succeeded',
+          paymentMethod: 'Visa •••• 4242',
+          providerReference: invoice.transactionReference,
+          description: `Plan changed to ${targetPlan.name}`,
+          date: now.toISOString(),
+          createdAt: now.toISOString(),
+        },
+        env
+      );
     }
 
     // 5. Audit log
-    await saveFirestoreDocRest('audit_logs', `log-plan-${Date.now()}`, {
-      restaurantId: cleanRestaurantId,
-      action: 'billing.plan_changed',
-      userId: actor?.id || 'admin',
-      userName: actor?.name || 'Restaurant Manager',
-      userEmail: actor?.email || 'manager@restaurant.com',
-      details: {
-        oldPlanId: sub?.planId,
-        newPlanId: targetPlan.id,
-        newPlanName: targetPlan.name,
-        billingFrequency,
-        newPrice,
+    await saveFirestoreDocRest(
+      'audit_logs',
+      `log-plan-${Date.now()}`,
+      {
+        restaurantId: cleanRestaurantId,
+        action: 'billing.plan_changed',
+        userId: actor?.id || 'admin',
+        userName: actor?.name || 'Restaurant Manager',
+        userEmail: actor?.email || 'manager@restaurant.com',
+        details: {
+          oldPlanId: sub?.planId,
+          newPlanId: targetPlan.id,
+          newPlanName: targetPlan.name,
+          billingFrequency,
+          newPrice,
+        },
+        createdAt: now.toISOString(),
       },
-      createdAt: now.toISOString(),
-    }, env);
+      env
+    );
 
     return jsonResponse({
       success: true,

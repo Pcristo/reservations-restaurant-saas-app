@@ -1,3 +1,5 @@
+import { isFeatureEnabled } from '../featureFlagsService';
+
 export interface SmsPayload {
   to: string;
   message?: string;
@@ -14,6 +16,14 @@ export interface SmsServiceResponse {
 }
 
 export async function sendSms(payload: SmsPayload): Promise<SmsServiceResponse> {
+  // Respect platform feature flag for SMS notifications
+  if (!isFeatureEnabled('sms_notifications')) {
+    return {
+      success: false,
+      error: 'SMS notifications are currently disabled by platform feature flags.'
+    };
+  }
+
   try {
     const response = await fetch('/api/send-sms', {
       method: 'POST',

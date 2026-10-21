@@ -4,10 +4,43 @@ import { ShieldAlert, LogOut, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const ImpersonationBanner: React.FC = () => {
-  const { isImpersonating, tenant, exitImpersonation } = useTenant();
+  const { isImpersonating, tenant, exitImpersonation, activeSupportSession } = useTenant();
   const navigate = useNavigate();
 
-  if (!isImpersonating || !tenant) return null;
+  if (!isImpersonating && !activeSupportSession) return null;
+
+  if (activeSupportSession) {
+    return (
+      <div 
+        id="superadmin-support-mode-banner"
+        className="bg-sky-700 text-white px-4 py-2.5 text-sm font-medium flex items-center justify-between shadow-md relative z-50 animate-in fade-in slide-in-from-top duration-200"
+      >
+        <div className="flex items-center gap-2.5 max-w-4xl truncate">
+          <ShieldAlert className="w-5 h-5 flex-shrink-0 text-sky-200" />
+          <span className="truncate">
+            <strong>SUPPORT MODE</strong> — <em>{activeSupportSession.superAdminName}</em> is assisting <strong>{activeSupportSession.restaurantName || 'Restaurant'}</strong>
+          </span>
+          <span className="hidden sm:inline-block px-2 py-0.5 text-xs bg-sky-800/60 rounded font-mono">
+            Expires: {new Date(activeSupportSession.expiresAt).toLocaleTimeString()}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+          <button
+            id="btn-support-mode-exit"
+            onClick={() => {
+              exitImpersonation();
+              navigate('/app/super-admin');
+            }}
+            className="px-3 py-1 text-xs bg-white text-sky-800 hover:bg-sky-50 font-semibold rounded transition-colors flex items-center gap-1 shadow-sm"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            End Support Session
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 

@@ -73,7 +73,7 @@ describe('Reservation Modification Availability & Table Selection', () => {
     customerName: 'Alice Walker',
     customerEmail: 'alice@example.com',
     customerPhone: '+351912345678',
-    date: '2026-10-19', // Monday
+    date: '2027-01-04', // Monday
     time: '19:30',
     guests: 2,
     tableId: 'table-2top',
@@ -87,7 +87,7 @@ describe('Reservation Modification Availability & Table Selection', () => {
     customerName: 'Bob Builder',
     customerEmail: 'bob@example.com',
     customerPhone: '+351919876543',
-    date: '2026-10-19',
+    date: '2027-01-04',
     time: '20:00',
     guests: 4,
     tableId: 'table-4top',
@@ -97,7 +97,7 @@ describe('Reservation Modification Availability & Table Selection', () => {
 
   it('calculates available slots for the selected date respecting lunch and dinner hours', () => {
     const result = calculateAvailableTimeSlots({
-      date: '2026-10-19', // Monday
+      date: '2027-01-04', // Monday
       guests: 2,
       currentResId: currentReservation.id,
       settings: mockSettings as RestaurantSettings,

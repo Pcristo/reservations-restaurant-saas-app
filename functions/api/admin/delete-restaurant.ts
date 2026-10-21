@@ -2,7 +2,8 @@ import { jsonResponse, errorResponse } from '../../lib/response';
 import { 
   deleteFirestoreDocRest, 
   deleteMatchingDocsRest, 
-  verifyAuthToken 
+  verifyAuthToken,
+  getFirestoreDocRest
 } from '../../lib/firebaseAdmin';
 
 export async function onRequestPost(context: any) {
@@ -12,12 +13,23 @@ export async function onRequestPost(context: any) {
     const authHeader = context.request.headers.get('Authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-    // Verify token if provided
-    if (token) {
-      const authCheck = await verifyAuthToken(token, env);
-      if (!authCheck.success) {
-        console.warn('[DeleteRestaurant] Token verification warning:', authCheck.error);
-      }
+    if (!token) {
+      return errorResponse('Unauthorized: Missing authentication token.', 401);
+    }
+
+    const authCheck = await verifyAuthToken(token, env);
+    if (!authCheck.success || !authCheck.uid) {
+      return errorResponse(authCheck.error || 'Unauthorized', 401);
+    }
+
+    const callerEmail = (authCheck.email || '').trim().toLowerCase();
+    const callerData = await getFirestoreDocRest('users', authCheck.uid, env, token);
+    const isSuperAdmin =
+      callerEmail === 'pcristo35@gmail.com' ||
+      (callerData && (callerData.role === 'super_admin' || callerData.role === 'superadmin') && !callerData.restaurantId);
+
+    if (!isSuperAdmin) {
+      return errorResponse('Forbidden: Only Super Administrators can delete restaurant tenants.', 403);
     }
 
     const restaurantId = (body.restaurantId || body.id || '').trim();
@@ -54,6 +66,9 @@ export async function onRequestPost(context: any) {
 
     // 8. Delete smart alerts
     await deleteMatchingDocsRest('smart_alerts', 'restaurantId', restaurantId, env, token).catch(() => {});
+
+    // 9. Delete staff & admin user profiles associated with this restaurant
+    await deleteMatchingDocsRest('users', 'restaurantId', restaurantId, env, token).catch(() => {});
 
     return jsonResponse({
       success: true,

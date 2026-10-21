@@ -22,7 +22,8 @@ import {
   Sparkles,
   Video,
   LayoutGrid,
-  Save
+  Save,
+  LifeBuoy
 } from 'lucide-react';
 import { listAllRestaurants, listAllDomains, listAuditLogs } from '../../services/tenantService';
 import { Restaurant, DomainRecord, AuditLogEntry, MarketingWebsiteSettings } from '../../types';
@@ -107,7 +108,9 @@ export const SuperAdminDashboard: React.FC = () => {
       console.warn('Notice onSnapshot platform settings:', err);
     });
 
-    return () => unsubPlatform();
+    return () => {
+      unsubPlatform();
+    };
   }, []);
 
   const totalRestaurants = restaurants.length;

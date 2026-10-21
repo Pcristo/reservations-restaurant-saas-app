@@ -1,4 +1,4 @@
-import { getFirestoreSettings, getPlatformSettings } from './firebaseAdmin';
+import { getFirestoreSettings, getPlatformSettings, getPlatformFeatureFlags } from './firebaseAdmin';
 
 export interface SendSmsPayload {
   phoneNumber: string;
@@ -18,6 +18,20 @@ export async function sendSmsViaTwilio(payload: SendSmsPayload, env: Record<stri
       error: 'Phone number and verification code are required.',
       status: 400
     };
+  }
+
+  try {
+    const flags = await getPlatformFeatureFlags(env);
+    const smsFlag = flags.find((f) => f && f.id === 'sms_notifications');
+    if (smsFlag && smsFlag.enabled === false) {
+      return {
+        success: false,
+        error: 'SMS notifications are currently disabled by platform feature flags.',
+        status: 403
+      };
+    }
+  } catch (e) {
+    // Non-fatal fallback
   }
 
   let accountSid = (payload.twilioAccountSid || env.TWILIO_ACCOUNT_SID || '').trim();

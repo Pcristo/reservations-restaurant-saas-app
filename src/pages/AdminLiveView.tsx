@@ -31,6 +31,7 @@ import CustomDropdown, { DropdownOption } from '../components/CustomDropdown';
 import { triggerPrint } from '../utils/printUtils';
 import { takeScreenshot } from '../utils/screenshotUtils';
 import { checkReservationConflict } from '../features/reservations/conflictDetection';
+import { useFeatureFlags } from '../services/featureFlagsService';
 
 const cleanTableName = (name: string) => {
   return name.replace(/table\s*/gi, '').replace(/mesa\s*/gi, '').trim();
@@ -88,6 +89,8 @@ export default function AdminLiveView() {
   const { slug } = useParams<{ slug?: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const waitlistEnabled = isFeatureEnabled('waitlist_management');
   const tenant = useTenantSafe();
   const location = useLocation();
   const rawSlug = slug || tenant?.slug || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]) || 'bela-italia';
@@ -95,8 +98,31 @@ export default function AdminLiveView() {
   const isStaffRoute = location.pathname.includes('/staff');
   const adminBase = isStaffRoute ? `/r/${currentSlug}/staff` : `/r/${currentSlug}/admin`;
   const { tables, areas = [], loading: tablesLoading, updateTable, updateArea } = useTables();
-  const { customers } = useCustomers();
-  const { settings, loading: settingsLoading, updateSettings } = useSettings();
+  const targetRestaurantIdentifier = currentSlug || slug || tenant?.tenant?.id || tenant?.tenant?.slug;
+  const { settings, loading: settingsLoading, updateSettings } = useSettings(targetRestaurantIdentifier);
+
+  // Resolve floor plan background image (uploaded Cloudinary image or default layout)
+  const [floorPlanImgError, setFloorPlanImgError] = useState(false);
+  const resolvedFloorPlanBg = useMemo(() => {
+    if (settings?.useDefaultFloorPlanBg === true) {
+      return restaurantFloorPlan;
+    }
+    const customUrl = (
+      settings?.floorPlanBgUrl || 
+      (settings as any)?.cloudinaryFloorPlanBgUrl || 
+      ''
+    ).trim();
+
+    if (customUrl) {
+      return customUrl;
+    }
+    return restaurantFloorPlan;
+  }, [settings?.useDefaultFloorPlanBg, settings?.floorPlanBgUrl, (settings as any)?.cloudinaryFloorPlanBgUrl]);
+
+  useEffect(() => {
+    setFloorPlanImgError(false);
+  }, [resolvedFloorPlanBg]);
+
   const { t, language } = useLanguage();
   const { confirm, ConfirmationDialog } = useConfirm();
   useEffect(() => {
@@ -146,6 +172,7 @@ export default function AdminLiveView() {
   const { reservations, loading: resLoading, updateReservation, addReservation } = useReservations({ date: selectedDate });
   const { user: currentUser } = useAuth();
   const { users } = useUsers();
+  const { customers } = useCustomers();
 
   const currentStaffNumber = useMemo(() => {
     if (!currentUser) return undefined;
@@ -2015,18 +2042,22 @@ export default function AdminLiveView() {
           {/* Floor Plan Background Image */}
           {settings?.showFloorPlanBg !== false && (
             <div 
-              className="absolute inset-0 pointer-events-none z-0"
+              className="absolute inset-0 pointer-events-none z-0 overflow-hidden rounded-3xl"
             >
               <img 
-                src={settings?.useDefaultFloorPlanBg ? restaurantFloorPlan : (settings?.floorPlanBgUrl || restaurantFloorPlan)} 
+                src={floorPlanImgError ? restaurantFloorPlan : resolvedFloorPlanBg} 
                 alt="Floor Plan" 
-                className="w-full h-full object-fill" 
+                className="w-full h-full object-fill select-none pointer-events-none transition-opacity duration-300" 
                 referrerPolicy="no-referrer"
-                style={{ opacity: 1.0 }}
-              />
-              <div 
-                className="absolute inset-0 bg-black transition-opacity duration-300"
-                style={{ opacity: settings?.floorPlanOpacity === 0.3 ? 0.0 : (settings?.floorPlanOpacity ?? 0.0) }} 
+                onError={() => {
+                  if (!floorPlanImgError && resolvedFloorPlanBg !== restaurantFloorPlan) {
+                    console.warn('[AdminLiveView] Custom floor plan image failed to load, falling back to default layout.');
+                    setFloorPlanImgError(true);
+                  }
+                }}
+                style={{ 
+                  opacity: typeof settings?.floorPlanOpacity === 'number' ? settings.floorPlanOpacity : 1.0 
+                }}
               />
             </div>
           )}
@@ -2377,6 +2408,15 @@ export default function AdminLiveView() {
             )}>{t('dashboard.live_status') || "Real-time floor plan status"}</p>
           </div>
           <div className="flex items-center gap-2">
+            {resolvedFloorPlanBg !== restaurantFloorPlan && !floorPlanImgError && (
+              <span 
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 h-[42px] rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-2xs"
+                title="Custom Cloudinary floor plan layout active for this restaurant"
+              >
+                <Sparkles size={13} className="text-amber-500" />
+                <span>{language === 'pt' ? 'Planta Personalizada' : 'Custom Floor Plan'}</span>
+              </span>
+            )}
             <button
               onClick={() => setViewMode('floorplan')}
               className={cn(
@@ -3356,29 +3396,33 @@ export default function AdminLiveView() {
                     { value: 'no-show', label: t('res.no_show') || t('res.no-show') || "No-show", colorDot: 'bg-gray-500' },
                     { value: 'completed', label: t('res.completed'), colorDot: 'bg-yellow-400' },
                     { value: 'cancelled', label: t('res.cancelled'), colorDot: 'bg-red-500' },
-                    { value: 'waiting-list', label: t('res.waiting-list'), colorDot: 'bg-gray-400' },
+                    ...(waitlistEnabled || selectedRes.status === 'waiting-list'
+                      ? [{ value: 'waiting-list', label: t('res.waiting-list'), colorDot: 'bg-gray-400' }]
+                      : []),
                   ]}
                 />
               </div>
 
-              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100 mt-3 flex items-center justify-between">
-                <span className="text-sm font-bold text-amber-900">{t('res.waitlist')}</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={selectedRes.isWaitlist || false}
-                    onChange={(e) => {
-                      const isChecked = e.target.checked;
-                      const updatedStatus = (isChecked ? 'waiting-list' : (selectedRes.status === 'waiting-list' ? 'confirmed' : selectedRes.status)) as Reservation['status'];
-                      const updated = { ...selectedRes, isWaitlist: isChecked, status: updatedStatus, tableId: isChecked ? "" : selectedRes.tableId };
-                      updateReservation(selectedRes.id, updated);
-                      setSelectedRes(updated);
-                    }}
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
-                </label>
-              </div>
+              {waitlistEnabled && (
+                <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100 mt-3 flex items-center justify-between">
+                  <span className="text-sm font-bold text-amber-900">{t('res.waitlist')}</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={selectedRes.isWaitlist || false}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        const updatedStatus = (isChecked ? 'waiting-list' : (selectedRes.status === 'waiting-list' ? 'confirmed' : selectedRes.status)) as Reservation['status'];
+                        const updated = { ...selectedRes, isWaitlist: isChecked, status: updatedStatus, tableId: isChecked ? "" : selectedRes.tableId };
+                        updateReservation(selectedRes.id, updated);
+                        setSelectedRes(updated);
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                  </label>
+                </div>
+              )}
 
               <div className="p-3 bg-green-50 rounded-2xl border border-green-100 mt-3 flex items-center justify-between">
                 <div className="flex flex-col">

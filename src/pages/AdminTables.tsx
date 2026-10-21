@@ -6,13 +6,17 @@ import { useTables } from '../hooks/useTables';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { useSettings } from '../hooks/useSettings';
-import { LayoutGrid, Plus, Trash2, Edit2, Save, X, Move, Users, Circle, Square, RectangleHorizontal, RotateCw, Maximize2, Minimize2, Eye, EyeOff, Sun, Moon, GripVertical, Printer } from 'lucide-react';
+import { LayoutGrid, Plus, Trash2, Edit2, Save, X, Move, Users, Circle, Square, RectangleHorizontal, RotateCw, Maximize2, Minimize2, Eye, EyeOff, Sun, Moon, GripVertical, Printer, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Table, TableShape, Area } from '../types';
 import restaurantFloorPlan from '../assets/restaurant_floor-plan.jpg';
 import { motion, AnimatePresence } from 'motion/react';
 import { CustomDropdown, DropdownOption } from '../components/CustomDropdown';
 import { triggerPrint } from '../utils/printUtils';
+import { useTenantSafe } from '../hooks/useTenant';
+import { formatResourceAllowance } from '../services/entitlementsService';
+import { Link } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 
 const cleanTableName = (name: string) => {
   return name.replace(/table\s*/gi, '').replace(/mesa\s*/gi, '').trim();
@@ -232,7 +236,9 @@ const DraggableTable: React.FC<DraggableTableProps> = ({ table, areas = [], isAd
 };
 
 export default function AdminTables() {
-  const { tables, areas = [], addTable, updateTable, deleteTable, addArea, updateArea, deleteArea, loading } = useTables();
+  const tenantCtx = useTenantSafe();
+  const { tables, areas = [], addTable, updateTable, deleteTable, addArea, updateArea, deleteArea, loading, tableLimitCheck, activeTablesCount } = useTables();
+  const adminBase = tenantCtx?.slug ? `/r/${tenantCtx.slug}/admin` : '/admin';
   const sortedAreas = React.useMemo(() => {
     return [...areas].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }, [areas]);
@@ -269,7 +275,25 @@ export default function AdminTables() {
     setDraggedAreaId(null);
   };
 
-  const { settings } = useSettings();
+  const targetRestaurantIdentifier = tenantCtx?.slug || tenantCtx?.tenant?.id || tenantCtx?.tenant?.slug;
+  const { settings } = useSettings(targetRestaurantIdentifier);
+
+  const [floorPlanImgError, setFloorPlanImgError] = React.useState(false);
+  const resolvedFloorPlanBg = React.useMemo(() => {
+    if (settings?.useDefaultFloorPlanBg === true) {
+      return restaurantFloorPlan;
+    }
+    const customUrl = (settings?.floorPlanBgUrl || (settings as any)?.cloudinaryFloorPlanBgUrl || '').trim();
+    if (customUrl) {
+      return customUrl;
+    }
+    return restaurantFloorPlan;
+  }, [settings?.useDefaultFloorPlanBg, settings?.floorPlanBgUrl, (settings as any)?.cloudinaryFloorPlanBgUrl]);
+
+  React.useEffect(() => {
+    setFloorPlanImgError(false);
+  }, [resolvedFloorPlanBg]);
+
   const { isAdmin } = useAuth();
   const { t, language } = useLanguage();
   const [editingTable, setEditingTable] = useState<Partial<Table> | null>(null);
@@ -721,7 +745,16 @@ export default function AdminTables() {
           )}>{t('dashboard.floor_plan')}</p>
         </div>
         {isAdmin && (
-          <div className="flex gap-3 no-print">
+          <div className="flex flex-wrap items-center gap-3 no-print">
+            {/* Table Quota Allowance Indicator */}
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+              <MdTableRestaurant size={16} className="text-amber-600" />
+              <span>
+                {language === 'pt' ? 'Capacidade de Mesas:' : 'Dining Tables:'}{' '}
+                <strong className="text-gray-900 dark:text-white">{tables.length}</strong> / {formatResourceAllowance(tenantCtx?.entitlements, 'tables', language)}
+              </span>
+            </div>
+
             <button
               onClick={() => setShowAreaModal(true)}
               className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors shadow-sm cursor-pointer"
@@ -730,8 +763,23 @@ export default function AdminTables() {
               {language === 'pt' ? 'Gerir Áreas' : 'Manage Areas'}
             </button>
             <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition-colors shadow-sm cursor-pointer"
+              onClick={() => {
+                if (tableLimitCheck && !tableLimitCheck.allowed) {
+                  toast.error(
+                    tableLimitCheck.reasonPt ||
+                    tableLimitCheck.reason ||
+                    'Dining table limit reached for your subscription package. Please upgrade.'
+                  );
+                  return;
+                }
+                setShowAddModal(true);
+              }}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm cursor-pointer",
+                tableLimitCheck && !tableLimitCheck.allowed
+                  ? "bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed hover:bg-gray-200 dark:hover:bg-gray-800"
+                  : "bg-amber-600 text-white hover:bg-amber-700"
+              )}
             >
               <Plus size={20} />
               {t('tables.new')}
@@ -739,6 +787,26 @@ export default function AdminTables() {
           </div>
         )}
       </div>
+
+      {/* Downgrade / Limit Warning Banner */}
+      {tableLimitCheck && !tableLimitCheck.allowed && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs no-print">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+            <span>
+              {language === 'pt'
+                ? `Limite de mesas atingido (${tableLimitCheck.limit} mesas permitidas no pacote ${tenantCtx?.plan?.name || ''}). As mesas existentes são mantidas em segurança, mas não é possível adicionar novas mesas sem fazer upgrade.`
+                : `Table limit reached (${tableLimitCheck.limit} tables allowed in the ${tenantCtx?.plan?.name || ''} package). Existing tables are preserved safely, but adding new tables is restricted until you upgrade.`}
+            </span>
+          </div>
+          <Link
+            to={`${adminBase}/billing`}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold whitespace-nowrap self-start sm:self-auto shadow-xs"
+          >
+            {language === 'pt' ? 'Fazer Upgrade' : 'Upgrade Plan'}
+          </Link>
+        </div>
+      )}
 
       {/* Control row with layout selector & full window */}
       <div className="mb-6 flex flex-wrap gap-4 items-center justify-between no-print">
@@ -879,15 +947,14 @@ export default function AdminTables() {
                 className="absolute inset-0 pointer-events-none z-0"
               >
                 <img 
-                  src={settings?.useDefaultFloorPlanBg ? restaurantFloorPlan : (settings?.floorPlanBgUrl || restaurantFloorPlan)} 
+                  src={floorPlanImgError ? restaurantFloorPlan : resolvedFloorPlanBg} 
                   alt="Floor Plan" 
-                  className="w-full h-full object-fill" 
+                  className="w-full h-full object-fill select-none pointer-events-none transition-opacity duration-300" 
                   referrerPolicy="no-referrer"
-                  style={{ opacity: 1.0 }}
-                />
-                <div 
-                  className="absolute inset-0 bg-black transition-opacity duration-300"
-                  style={{ opacity: settings?.floorPlanOpacity === 0.3 ? 0.0 : (settings?.floorPlanOpacity ?? 0.0) }} 
+                  onError={() => setFloorPlanImgError(true)}
+                  style={{ 
+                    opacity: typeof settings?.floorPlanOpacity === 'number' ? settings.floorPlanOpacity : 1.0 
+                  }}
                 />
               </div>
             )}
@@ -1833,6 +1900,37 @@ export default function AdminTables() {
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">
                     {language === 'pt' ? 'Configurações de Sessão & Disponibilidade' : 'Session & Availability Settings'}
                   </label>
+
+                  {/* Sync Positions Controls */}
+                  <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs space-y-2">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                      {language === 'pt' ? 'Posições da Mesa (Resetar para Padrão)' : 'Table Positions (Reset to Default)'}
+                    </label>
+                    <div className="flex gap-2">
+                       <button
+                         type="button"
+                         onClick={() => {
+                           const newPositions = { ...(editingTable.positions || {}) };
+                           delete newPositions.lunch;
+                           setEditingTable({ ...editingTable, positions: newPositions });
+                         }}
+                         className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 px-2 py-1.5 rounded-lg font-semibold"
+                       >
+                         {language === 'pt' ? 'Resetar Almoço' : 'Reset Lunch'}
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => {
+                           const newPositions = { ...(editingTable.positions || {}) };
+                           delete newPositions.dinner;
+                           setEditingTable({ ...editingTable, positions: newPositions });
+                         }}
+                         className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-2 py-1.5 rounded-lg font-semibold"
+                       >
+                         {language === 'pt' ? 'Resetar Jantar' : 'Reset Dinner'}
+                       </button>
+                    </div>
+                  </div>
 
                   {/* 1. Mesa Ativa / Table is active */}
                   <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs space-y-2">
@@ -2846,10 +2944,11 @@ export default function AdminTables() {
                       className="absolute inset-0 pointer-events-none z-0"
                     >
                       <img 
-                        src={settings?.useDefaultFloorPlanBg ? restaurantFloorPlan : (settings?.floorPlanBgUrl || restaurantFloorPlan)} 
+                        src={floorPlanImgError ? restaurantFloorPlan : resolvedFloorPlanBg} 
                         alt="Floor Plan" 
                         className="w-full h-full object-fill" 
                         referrerPolicy="no-referrer"
+                        onError={() => setFloorPlanImgError(true)}
                         style={{ opacity: 1.0 }}
                       />
                       <div 

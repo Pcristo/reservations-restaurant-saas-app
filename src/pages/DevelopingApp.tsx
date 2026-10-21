@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../hooks/useLanguage';
+import { useFeatureFlags } from '../services/featureFlagsService';
 import { Lock, ArrowRight, Eye, EyeOff, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
 import logoZ from '../assets/developer/zarco_logo_z_no_bg.png';
@@ -13,6 +14,8 @@ interface DevelopingAppProps {
 
 export default function DevelopingApp({ onUnlock }: DevelopingAppProps) {
   const { language, setLanguage } = useLanguage();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const multiLanguageEnabled = isFeatureEnabled('multi_language');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -53,38 +56,40 @@ export default function DevelopingApp({ onUnlock }: DevelopingAppProps) {
     <div className="min-h-screen bg-[#030f20] text-gray-100 flex flex-col items-center justify-between py-12 px-6 font-sans">
       {/* Top Section with Language Selector */}
       <div className="w-full max-w-md flex justify-end">
-        <div className="flex items-center gap-1 bg-[#0c1e36] border border-[#173154] p-1 rounded-full shadow-sm">
-          <button
-            type="button"
-            onClick={() => {
-              setLanguage('en');
-              setError('');
-            }}
-            className={cn(
-              "px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer",
-              language === 'en'
-                ? "bg-amber-500 text-white shadow-sm"
-                : "text-gray-400 hover:text-white"
-            )}
-          >
-            EN
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setLanguage('pt');
-              setError('');
-            }}
-            className={cn(
-              "px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer",
-              language === 'pt'
-                ? "bg-amber-500 text-white shadow-sm"
-                : "text-gray-400 hover:text-white"
-            )}
-          >
-            PT
-          </button>
-        </div>
+        {multiLanguageEnabled && (
+          <div className="flex items-center gap-1 bg-[#0c1e36] border border-[#173154] p-1 rounded-full shadow-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setLanguage('en');
+                setError('');
+              }}
+              className={cn(
+                "px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer",
+                language === 'en'
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-gray-400 hover:text-white"
+              )}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLanguage('pt');
+                setError('');
+              }}
+              className={cn(
+                "px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer",
+                language === 'pt'
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-gray-400 hover:text-white"
+              )}
+            >
+              PT
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Center Section: Lock Form */}

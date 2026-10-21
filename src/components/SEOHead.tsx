@@ -1,6 +1,9 @@
 import React, { useEffect } from 'react';
 import { RestaurantSettings } from '../types';
 import { updateFavicon, getOptimizedUrl } from '../lib/utils';
+import { useFeatureFlags } from '../services/featureFlagsService';
+import { useTenantSafe } from '../hooks/useTenant';
+import { isPackageFeatureEnabled } from '../services/entitlementsService';
 
 interface SEOHeadProps {
   settings?: RestaurantSettings | null;
@@ -8,6 +11,12 @@ interface SEOHeadProps {
 }
 
 export const SEOHead: React.FC<SEOHeadProps> = ({ settings, language = 'en' }) => {
+  const { isFeatureEnabled } = useFeatureFlags();
+  const tenantCtx = useTenantSafe();
+  const advancedSeoEnabled = isFeatureEnabled('advanced_seo');
+  const isEntitled = isPackageFeatureEnabled(tenantCtx?.entitlements, 'advancedSEO');
+  const isSeoActive = advancedSeoEnabled && isEntitled;
+
   useEffect(() => {
     if (!settings) return;
 
@@ -16,6 +25,14 @@ export const SEOHead: React.FC<SEOHeadProps> = ({ settings, language = 'en' }) =
 
     const isPt = language === 'pt';
     const seo = settings.seo;
+
+    // Respect platform feature flag and restaurant package entitlement for Dynamic Schema.org & SEO Meta
+    if (!isSeoActive) {
+      document.title = settings.name || 'DineMaster Pro';
+      const existingJsonLd = document.getElementById('schema-restaurant-jsonld');
+      if (existingJsonLd) existingJsonLd.remove();
+      return;
+    }
 
     // 1. Title
     const title = (isPt ? seo?.seoTitlePt : seo?.seoTitleEn) ||
@@ -209,7 +226,7 @@ export const SEOHead: React.FC<SEOHeadProps> = ({ settings, language = 'en' }) =
     return () => {
       // Optional cleanup on unmount if needed
     };
-  }, [settings, language]);
+  }, [settings, language, advancedSeoEnabled]);
 
   return null;
 };

@@ -3,7 +3,7 @@ import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-
 import { useAuth } from '../../hooks/useAuth';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useTenant } from '../../hooks/useTenant';
-import { isUserSuperAdmin } from '../../lib/permissions';
+import { isUserSuperAdmin, doesUserBelongToRestaurant, normalizeTenantIdentifier } from '../../lib/permissions';
 import { SuperAdminLogin } from '../../pages/superadmin/SuperAdminLogin';
 import { SuperAdminAccessDenied } from '../../pages/superadmin/SuperAdminAccessDenied';
 import toast from 'react-hot-toast';
@@ -32,7 +32,7 @@ export function ProtectedRoute({
 
   if (!user) {
     const isStaffRoute = location.pathname.includes('/admin') || location.pathname.includes('/staff');
-    const targetSlug = slug || tenant?.slug || 'bela-italia';
+    const targetSlug = normalizeTenantIdentifier(slug || tenant?.slug || 'bela-italia') || 'bela-italia';
     const dest = isStaffRoute 
       ? `/r/${targetSlug}/login?role=admin&returnUrl=${encodeURIComponent(location.pathname + location.search)}`
       : `/r/${targetSlug}/login?role=customer`;
@@ -43,26 +43,21 @@ export function ProtectedRoute({
     return <>{children}</>;
   }
 
-  // Cross-tenant guard for restaurant admin/staff routes
-  const targetRestaurantSlug = (slug || tenant?.slug || '').toLowerCase();
-  const normalizedTargetSlug = targetRestaurantSlug === 'bella-italia' ? 'bela-italia' : targetRestaurantSlug;
+  // Strict cross-tenant guard for restaurant admin & staff routes
+  const normalizedTargetSlug = normalizeTenantIdentifier(slug || tenant?.slug || '');
 
   if (role !== 'customer') {
-    const userRest = (user.restaurantId || (user.restaurantIds && user.restaurantIds[0]) || '').toLowerCase();
-    const normalizedUserRest = userRest === 'bella-italia' ? 'bela-italia' : userRest;
-    const userRestIds = (user.restaurantIds || []).map(id => id.toLowerCase() === 'bella-italia' ? 'bela-italia' : id.toLowerCase());
-    const restId = (tenant?.id || '').toLowerCase();
-    const restSlug = (tenant?.slug || '').toLowerCase();
-    const normalizedTenantSlug = restSlug === 'bella-italia' ? 'bela-italia' : restSlug;
+    const matchingTenant =
+      tenant &&
+      (!normalizedTargetSlug ||
+        normalizeTenantIdentifier(tenant.slug) === normalizedTargetSlug ||
+        normalizeTenantIdentifier(tenant.id) === normalizedTargetSlug)
+        ? tenant
+        : null;
 
     const isMatch = Boolean(
-      normalizedUserRest && normalizedTargetSlug && (
-        normalizedUserRest === normalizedTargetSlug ||
-        normalizedUserRest === restId ||
-        normalizedUserRest === normalizedTenantSlug ||
-        userRestIds.includes(normalizedTargetSlug) ||
-        (tenant && (userRestIds.includes(restId) || userRestIds.includes(normalizedTenantSlug)))
-      )
+      normalizedTargetSlug &&
+      doesUserBelongToRestaurant(user, normalizedTargetSlug, matchingTenant)
     );
 
     if (!isMatch) {
@@ -81,7 +76,7 @@ export function ProtectedRoute({
   }
 
   if (role === 'admin' && !isAdmin) {
-    const targetSlug = slug || tenant?.slug || 'bela-italia';
+    const targetSlug = normalizeTenantIdentifier(slug || tenant?.slug || user.restaurantId || 'bela-italia') || 'bela-italia';
     const dest = `/r/${targetSlug}/staff`;
     return <Navigate to={dest} replace />;
   }
@@ -123,7 +118,10 @@ export function SuperAdminRoute({ children }: { children: React.ReactNode }) {
     return <SuperAdminLogin />;
   }
 
-  if (!isSuperAdmin && !isUserSuperAdmin(user) && !isUserSuperAdmin(user.email)) {
+  const isMasterAdminEmail = (user.email || '').toLowerCase().trim() === 'pcristo35@gmail.com';
+  // Strictly block any restaurant-scoped account from Super Admin (unless Master Super Admin)
+  const hasRestaurantScope = !isMasterAdminEmail && Boolean(user.restaurantId || (user.restaurantIds && user.restaurantIds.length > 0));
+  if (hasRestaurantScope || (!isSuperAdmin && !isUserSuperAdmin(user) && !isMasterAdminEmail)) {
     return <SuperAdminAccessDenied userEmail={user.email} />;
   }
 
@@ -137,14 +135,19 @@ export function LegacyAdminRedirect() {
   const [searchParams] = useSearchParams();
 
   const queryRest = searchParams.get('restaurant');
-  const targetSlug = queryRest || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]) || tenant?.slug || 'bela-italia';
+  // Non-super-admins can NEVER use ?restaurant= to redirect into another restaurant's admin
+  const assignedRest = user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]);
+  const rawSlug = isSuperAdmin
+    ? (queryRest || tenant?.slug || assignedRest || 'bela-italia')
+    : (assignedRest || queryRest || tenant?.slug || 'bela-italia');
+  const targetSlug = normalizeTenantIdentifier(rawSlug) || 'bela-italia';
 
   if (!user) {
     return <Navigate to={`/r/${targetSlug}/login?role=admin`} state={{ from: location }} replace />;
   }
 
   const cleanPath = location.pathname.replace(/^\/admin\/?/, '');
-  const searchStr = location.search;
+  const searchStr = isSuperAdmin ? location.search : '';
 
   const isStaffOnly = (user.role === 'staff' || user.role === 'restaurant_staff') && !isSuperAdmin;
   const adminBase = isStaffOnly ? `/r/${targetSlug}/staff` : `/r/${targetSlug}/admin`;

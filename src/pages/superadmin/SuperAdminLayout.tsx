@@ -51,8 +51,9 @@ export const SuperAdminLayout: React.FC = () => {
     }
   }, [user, isSuperAdmin]);
 
+  const isMasterAdminEmail = (user?.email || '').toLowerCase().trim() === 'pcristo35@gmail.com';
   // Strict Super Admin Access Guard: Tenant accounts and unauthorized users cannot view this layout
-  if (!isSuperAdmin && !isUserSuperAdmin(user) && !isUserSuperAdmin(user?.email)) {
+  if (!isMasterAdminEmail && !isSuperAdmin && !isUserSuperAdmin(user) && !isUserSuperAdmin(user?.email)) {
     return <SuperAdminAccessDenied userEmail={user?.email} />;
   }
 
@@ -77,7 +78,7 @@ export const SuperAdminLayout: React.FC = () => {
     { label: 'Overview', to: '/app/super-admin', icon: LayoutDashboard, end: true },
     { label: 'Restaurants', to: '/app/super-admin/restaurants', icon: Store },
     { label: 'Custom Domains', to: '/app/super-admin/domains', icon: Globe },
-    { label: 'Plans & Billing', to: '/app/super-admin/plans', icon: CreditCard },
+    { label: 'Subscription Packages', to: '/app/super-admin/plans', icon: CreditCard },
     { label: 'Billing & Payments', to: '/app/super-admin/billing', icon: CreditCard },
     { label: 'Feature Flags', to: '/app/super-admin/features', icon: ToggleLeft },
     { label: 'Super Admins', to: '/app/super-admin/admins', icon: ShieldCheck },

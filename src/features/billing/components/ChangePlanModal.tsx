@@ -8,6 +8,7 @@ import {
   AlertCircle 
 } from 'lucide-react';
 import { Plan, RestaurantSubscription, BillingFrequency } from '../../../types';
+import { getLocalizedPlanName } from '../../../services/entitlementsService';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../hooks/useLanguage';
 
@@ -37,7 +38,9 @@ export const ChangePlanModal: React.FC<ChangePlanModalProps> = ({
   const isUpgrade = targetPlan.priceMonthly > (currentSubscription.priceMonthly || 0);
   const isAnnual = targetFrequency === 'annual';
   const price = isAnnual 
-    ? Math.round(targetPlan.priceMonthly * 12 * 0.8) 
+    ? (typeof targetPlan.priceAnnual === 'number' && targetPlan.priceAnnual > 0
+        ? targetPlan.priceAnnual
+        : Math.round(targetPlan.priceMonthly * 12 * 0.8))
     : targetPlan.priceMonthly;
 
   const formatCurrency = (amt: number) => `€${amt.toFixed(2)}`;
@@ -81,7 +84,7 @@ export const ChangePlanModal: React.FC<ChangePlanModalProps> = ({
                 {language === 'pt' ? 'Plano Atual:' : 'Current Plan:'}
               </span>
               <span className="font-bold text-gray-800 dark:text-gray-200">
-                {currentSubscription.planName} ({currentSubscription.billingFrequency === 'annual' ? (language === 'pt' ? 'Anual' : 'Annual') : (language === 'pt' ? 'Mensal' : 'Monthly')})
+                {getLocalizedPlanName({ id: currentSubscription.planId, name: currentSubscription.planName }, language)} ({currentSubscription.billingFrequency === 'annual' ? (language === 'pt' ? 'Anual' : 'Annual') : (language === 'pt' ? 'Mensal' : 'Monthly')})
               </span>
             </div>
 
@@ -90,7 +93,7 @@ export const ChangePlanModal: React.FC<ChangePlanModalProps> = ({
                 {language === 'pt' ? 'Novo Plano Escolhido:' : 'Target Plan:'}
               </span>
               <span className="font-bold text-amber-600 dark:text-amber-400 text-sm">
-                {targetPlan.name} ({isAnnual ? (language === 'pt' ? 'Anual' : 'Annual') : (language === 'pt' ? 'Mensal' : 'Monthly')})
+                {getLocalizedPlanName(targetPlan, language)} ({isAnnual ? (language === 'pt' ? 'Anual' : 'Annual') : (language === 'pt' ? 'Mensal' : 'Monthly')})
               </span>
             </div>
 

@@ -16,6 +16,7 @@ export interface RestaurantBranding {
   cloudinaryCloudName?: string;
   cloudinaryUploadPreset?: string;
   cloudinaryApiKey?: string;
+  floorPlanBgUrl?: string;
 }
 
 export interface RestaurantGalleryImage {
@@ -107,6 +108,7 @@ export interface RestaurantSettings {
   restaurantId?: string;
   name: string;
   timezone?: string;
+  language?: string;
   autoSendManualReservationsEmails?: boolean;
   description?: string;
   descriptionEn?: string;
@@ -170,6 +172,7 @@ export interface RestaurantSettings {
   cloudinaryFaviconUrl?: string;
   cloudinaryHeroImageUrl?: string;
   cloudinaryFooterImageUrl?: string;
+  cloudinaryFloorPlanBgUrl?: string;
   cloudinaryCloudName?: string;
   cloudinaryUploadPreset?: string;
   cloudinaryApiKey?: string;
@@ -231,6 +234,10 @@ export interface RestaurantSettings {
   allowCustomerModification?: boolean;
   customerManagement?: CustomerManagementSettings;
   seo?: RestaurantSEO;
+  supportAccessAllowed?: boolean;
+  supportAccessUpdatedAt?: string;
+  supportAccessUpdatedBy?: string;
+  activeSupportSessionId?: string | null;
 }
 
 export interface CustomerManagementSettings {
@@ -339,6 +346,8 @@ export interface Restaurant {
   status: RestaurantStatus;
   planId: string;
   planName?: string;
+  subscription?: import('./billing').RestaurantSubscription;
+  customEntitlements?: Partial<import('./plan').PlanEntitlements>;
   trialStartDate?: string;
   trialEndDate?: string;
   country: string;
@@ -369,6 +378,10 @@ export interface Restaurant {
   domains?: DomainRecord[];
   maintenanceModeEnabled?: boolean;
   maintenanceMessage?: string;
+  supportAccessAllowed?: boolean;
+  supportAccessUpdatedAt?: string;
+  supportAccessUpdatedBy?: string;
+  activeSupportSessionId?: string | null;
   stats?: {
     totalReservations: number;
     totalCustomers: number;

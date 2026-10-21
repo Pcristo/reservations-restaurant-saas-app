@@ -8,7 +8,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useTenantSafe } from '../hooks/useTenant';
 import { getRestaurant, getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from '../services/tenantService';
 import { getMarketingWebsiteSettings } from '../services/marketingWebsiteService';
-import { isUserSuperAdmin } from '../lib/permissions';
+import { isUserSuperAdmin, doesUserBelongToRestaurant, normalizeTenantIdentifier, isCustomerRole } from '../lib/permissions';
 import { User, MarketingWebsiteSettings, Restaurant, RestaurantSettings } from '../types';
 import { getOptimizedUrl } from '../lib/utils';
 import { toast } from 'react-hot-toast';
@@ -39,22 +39,33 @@ export default function Login() {
   const tenantCtx = useTenantSafe();
   const tenant = tenantCtx?.tenant;
 
+  // Check if we are on the main platform login route (/login)
+  const isPlatformLoginRoute = location.pathname === '/login' || location.pathname === '/login/';
+
   // Determine restaurant context & requested role
   const searchParams = new URLSearchParams(location.search);
-  const rawRestaurantSlug = slug || searchParams.get('restaurant') || tenant?.slug || '';
+  // On the main /login route, always present the main DineMaster Pro login form,
+  // never DineMaster Bistro or any restaurant portal unless on an explicit /r/:slug route.
+  const rawRestaurantSlug = isPlatformLoginRoute 
+    ? '' 
+    : (slug || (searchParams.get('restaurant') && searchParams.get('restaurant') !== 'dinemaster-bistro' && searchParams.get('restaurant') !== DEFAULT_RESTAURANT_ID ? searchParams.get('restaurant')! : ''));
   const restaurantSlug = rawRestaurantSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawRestaurantSlug;
   const roleParam = searchParams.get('role');
   const modeParam = searchParams.get('mode');
 
   // Role detection
   const isAdminLogin = 
-    roleParam === 'admin' || 
-    roleParam === 'staff' || 
-    location.pathname.includes('/admin');
+    !isPlatformLoginRoute && (
+      roleParam === 'admin' || 
+      roleParam === 'staff' || 
+      location.pathname.includes('/admin')
+    );
 
   const isCustomerLogin = 
-    roleParam === 'customer' || 
-    (!isAdminLogin && Boolean(restaurantSlug));
+    !isPlatformLoginRoute && (
+      roleParam === 'customer' || 
+      (!isAdminLogin && Boolean(restaurantSlug))
+    );
 
   // Form states
   const [email, setEmail] = useState('');
@@ -69,17 +80,17 @@ export default function Login() {
 
   // Restaurant details
   const [targetRestaurant, setTargetRestaurant] = useState<Restaurant | null>(() => {
-    if (tenant && (tenant.slug === restaurantSlug || tenant.id === restaurantSlug)) {
+    if (!isPlatformLoginRoute && tenant && (tenant.slug === restaurantSlug || tenant.id === restaurantSlug)) {
       return tenant;
     }
     return null;
   });
-  const [loadingRestaurant, setLoadingRestaurant] = useState(Boolean(restaurantSlug && !targetRestaurant));
+  const [loadingRestaurant, setLoadingRestaurant] = useState(Boolean(!isPlatformLoginRoute && restaurantSlug && !targetRestaurant));
 
   // Restaurant Settings from Firestore 'settings' collection for this restaurant
   const [restaurantSettings, setRestaurantSettings] = useState<RestaurantSettings | null>(() => {
     try {
-      if (restaurantSlug) {
+      if (!isPlatformLoginRoute && restaurantSlug) {
         const cached = localStorage.getItem(`cached_restaurant_settings_${restaurantSlug}`);
         if (cached) return JSON.parse(cached);
       }
@@ -107,15 +118,15 @@ export default function Login() {
 
   // Sync modeParam
   useEffect(() => {
-    if (modeParam === 'signup' && !isAdminLogin) {
+    if (modeParam === 'signup' && !isAdminLogin && !isPlatformLoginRoute) {
       setIsSignUp(true);
     }
-  }, [modeParam, isAdminLogin]);
+  }, [modeParam, isAdminLogin, isPlatformLoginRoute]);
 
   // Load target restaurant if slug or restaurant query param is provided
   useEffect(() => {
     let isMounted = true;
-    if (restaurantSlug) {
+    if (!isPlatformLoginRoute && restaurantSlug) {
       if (!targetRestaurant || (targetRestaurant.slug !== restaurantSlug && targetRestaurant.id !== restaurantSlug)) {
         setLoadingRestaurant(true);
       }
@@ -141,12 +152,12 @@ export default function Login() {
       setLoadingRestaurant(false);
     }
     return () => { isMounted = false; };
-  }, [restaurantSlug]);
+  }, [restaurantSlug, isPlatformLoginRoute]);
 
   // Load and listen to restaurant settings in real-time from Firestore
   useEffect(() => {
     let isMounted = true;
-    const targetId = targetRestaurant?.id || restaurantSlug;
+    const targetId = !isPlatformLoginRoute ? (targetRestaurant?.id || restaurantSlug) : '';
     if (!targetId) {
       setRestaurantSettings(null);
       return;
@@ -199,38 +210,26 @@ export default function Login() {
   useEffect(() => {
     if (user && !authLoading) {
       // 1. If currently in a restaurant context (/r/:slug/...):
-      const effectiveSlug = (targetRestaurant?.slug || restaurantSlug || '').toLowerCase();
-      const normalizedTargetSlug = effectiveSlug === 'bella-italia' ? 'bela-italia' : effectiveSlug;
+      const effectiveSlug = !isPlatformLoginRoute ? normalizeTenantIdentifier(targetRestaurant?.slug || restaurantSlug) : '';
 
-      if (normalizedTargetSlug) {
+      if (effectiveSlug) {
         const isSuper = isUserSuperAdmin(user);
-        const userRestId = (user.restaurantId || (user.restaurantIds && user.restaurantIds[0]) || '').toLowerCase();
-        const normalizedUserRest = userRestId === 'bella-italia' ? 'bela-italia' : userRestId;
-        const userRestIds = (user.restaurantIds || []).map(id => id.toLowerCase() === 'bella-italia' ? 'bela-italia' : id.toLowerCase());
-        const isStaffOrAdminUser = user.role !== 'customer' || Boolean(userRestId);
-
-        const hasAccess = isSuper || Boolean(
-          normalizedUserRest && (
-            normalizedUserRest === normalizedTargetSlug ||
-            normalizedUserRest === targetRestaurant?.id?.toLowerCase() ||
-            userRestIds.includes(normalizedTargetSlug) ||
-            (targetRestaurant && userRestIds.includes(targetRestaurant.id.toLowerCase()))
-          )
-        );
+        const isStaffOrAdminUser = !isCustomerRole(user.role) || Boolean(user.restaurantId || (user.restaurantIds && user.restaurantIds.length > 0));
+        const hasAccess = isSuper || doesUserBelongToRestaurant(user, effectiveSlug, targetRestaurant);
 
         if (!hasAccess && isStaffOrAdminUser) {
           // Logged in with an account belonging to ANOTHER restaurant!
           // Terminate this session so user is not logged in across restaurants
-          console.warn(`[Login] Session belongs to restaurant ${userRestId}, not ${normalizedTargetSlug}. Resetting session.`);
+          console.warn(`[Login] Session belongs to restaurant ${user.restaurantId}, not ${effectiveSlug}. Resetting session.`);
           logout(true);
           return;
         }
 
-        if (isAdminLogin || isStaffOrAdminUser) {
-          const isStaffOnly = (user.role === 'staff' || user.role === 'restaurant_staff' || roleParam === 'staff') && user.role !== 'restaurant_owner' && user.role !== 'restaurant_manager' && user.role !== 'admin';
-          const targetBase = isStaffOnly ? `/r/${normalizedTargetSlug}/staff` : `/r/${normalizedTargetSlug}/admin`;
+        if (isAdminLogin || (isStaffOrAdminUser && hasAccess)) {
+          const isStaffOnly = (user.role === 'staff' || user.role === 'restaurant_staff' || roleParam === 'staff') && user.role !== 'restaurant_owner' && user.role !== 'restaurant_manager' && user.role !== 'admin' && !isSuper;
+          const targetBase = isStaffOnly ? `/r/${effectiveSlug}/staff` : `/r/${effectiveSlug}/admin`;
           const returnUrl = searchParams.get('returnUrl');
-          if (returnUrl && returnUrl.startsWith(`/r/${normalizedTargetSlug}`)) {
+          if (returnUrl && returnUrl.startsWith(`/r/${effectiveSlug}`)) {
             navigate(returnUrl, { replace: true });
           } else {
             navigate(targetBase, { replace: true });
@@ -239,7 +238,7 @@ export default function Login() {
         }
 
         if (user.role === 'customer' || isCustomerLogin) {
-          navigate(`/r/${normalizedTargetSlug}`, { replace: true });
+          navigate(`/r/${effectiveSlug}`, { replace: true });
           return;
         }
       }
@@ -264,7 +263,7 @@ export default function Login() {
       // 4. Restaurant Admin / Staff with restaurant association
       const rawRestSlug = user.restaurantId || (user.restaurantIds && user.restaurantIds[0]);
       if (rawRestSlug) {
-        const restSlug = rawRestSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawRestSlug;
+        const restSlug = normalizeTenantIdentifier(rawRestSlug);
         try {
           sessionStorage.setItem('eata_active_restaurant_id', restSlug);
           localStorage.setItem('eata_active_restaurant_id', restSlug);
@@ -415,24 +414,26 @@ export default function Login() {
 
       // 2. Query Firestore for User Record & Restaurant Association
       let userData: User | null = null;
+      const isNonCustomerDoc = (d: any) => d && d.role && d.role !== 'customer';
 
       try {
         const userDocRef = doc(db, 'users', firebaseUser.uid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
-          userData = userDocSnap.data() as User;
+          userData = { id: userDocSnap.id, ...(userDocSnap.data() as User) };
         }
       } catch (docErr) {
         console.warn('[Login] Error fetching direct user doc:', docErr);
       }
 
-      // Fallback query by authUid
-      if (!userData) {
+      // Fallback query by authUid (prefer staff/admin record over customer mirror)
+      if (!userData || !isNonCustomerDoc(userData)) {
         try {
           const qAuth = query(collection(db, 'users'), where('authUid', '==', firebaseUser.uid));
           const snapAuth = await getDocs(qAuth);
-          if (!snapAuth.empty) {
-            userData = snapAuth.docs[0].data() as User;
+          const staffDoc = snapAuth.docs.find(d => isNonCustomerDoc(d.data())) || snapAuth.docs[0];
+          if (staffDoc) {
+            userData = { id: staffDoc.id, ...(staffDoc.data() as User) };
           }
         } catch (authQErr) {
           console.warn('[Login] Error querying users by authUid:', authQErr);
@@ -440,15 +441,24 @@ export default function Login() {
       }
 
       // Fallback query by email
-      if (!userData && userEmail) {
-        try {
-          const qEmail = query(collection(db, 'users'), where('email', '==', userEmail));
-          const snapEmail = await getDocs(qEmail);
-          if (!snapEmail.empty) {
-            userData = snapEmail.docs[0].data() as User;
+      if (!userData || !isNonCustomerDoc(userData)) {
+        if (userEmail) {
+          try {
+            const qEmail = query(collection(db, 'users'), where('email', '==', userEmail));
+            const snapEmail = await getDocs(qEmail);
+            if (!snapEmail.empty) {
+              const targetRestSlug = normalizeTenantIdentifier(targetRestaurant?.slug || restaurantSlug);
+              const staffCandidates = snapEmail.docs.filter(d => isNonCustomerDoc(d.data()));
+              const matchedCandidate = (targetRestSlug && staffCandidates.find(d => doesUserBelongToRestaurant({ id: d.id, ...(d.data() as User) }, targetRestSlug, targetRestaurant)))
+                || staffCandidates[0]
+                || snapEmail.docs[0];
+              if (matchedCandidate) {
+                userData = { id: matchedCandidate.id, ...(matchedCandidate.data() as User) };
+              }
+            }
+          } catch (emailQErr) {
+            console.warn('[Login] Error querying users by email:', emailQErr);
           }
-        } catch (emailQErr) {
-          console.warn('[Login] Error querying users by email:', emailQErr);
         }
       }
 
@@ -503,11 +513,10 @@ export default function Login() {
       // =========================================================================
       if ((isAdminLogin || isStaffOrAdminAccount) && (targetRestaurant || restaurantSlug)) {
         const targetId = targetRestaurant?.id || restaurantSlug;
-        const rawTargetSlug = targetRestaurant?.slug || restaurantSlug;
-        const targetSlug = rawTargetSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawTargetSlug;
+        const targetSlug = normalizeTenantIdentifier(targetRestaurant?.slug || restaurantSlug);
 
         // Check if user is Super Admin logging in specifically to manage this restaurant
-        const isSuper = (userData?.role === 'super_admin' && !userData?.restaurantId) || userEmail === 'pcristo35@gmail.com';
+        const isSuper = (userData?.role === 'super_admin' && !userData?.restaurantId && (!userData?.restaurantIds || userData.restaurantIds.length === 0)) || userEmail === 'pcristo35@gmail.com';
         if (isSuper) {
           try {
             sessionStorage.setItem('eata_active_restaurant_id', targetId);
@@ -524,17 +533,22 @@ export default function Login() {
           return;
         }
 
-        // Restaurant admin / staff check
-        const userRestId = userRestaurantId;
-        const normalizedUserRest = userRestId?.toLowerCase() === 'bella-italia' ? 'bela-italia' : userRestId;
-        const userRestIds = (userData?.restaurantIds || []).map(id => id.toLowerCase() === 'bella-italia' ? 'bela-italia' : id.toLowerCase());
+        // Verify that the admin/staff belongs to THIS restaurant
+        const effectiveUserObj: User = {
+          id: firebaseUser.uid,
+          name: userData?.name || '',
+          email: userEmail,
+          role: userData?.role || 'staff',
+          status: (userData?.status as any) || 'active',
+          restaurantId: userRestaurantId,
+          restaurantIds: userData?.restaurantIds || (userRestaurantId ? [userRestaurantId] : []),
+        };
 
-        // Verify that the admin belongs to THIS restaurant
-        const hasAccessToThisRestaurant = 
-          normalizedUserRest === targetId.toLowerCase() || 
-          normalizedUserRest === targetSlug.toLowerCase() ||
-          userRestIds.includes(targetId.toLowerCase()) || 
-          userRestIds.includes(targetSlug.toLowerCase());
+        const hasAccessToThisRestaurant = doesUserBelongToRestaurant(
+          effectiveUserObj,
+          targetSlug,
+          targetRestaurant || { id: targetId, slug: targetSlug }
+        );
 
         if (!hasAccessToThisRestaurant) {
           // Account belongs to another restaurant! Enforce strict tenant boundary
@@ -543,6 +557,17 @@ export default function Login() {
             language === 'pt'
               ? `Acesso negado: A sua conta pertence a outro restaurante. Só tem permissão para aceder à gestão do seu próprio restaurante.`
               : `Access Denied: Your account belongs to another restaurant. You can only access your own restaurant's management system.`
+          );
+          setIsSubmitting(false);
+          return;
+        }
+
+        if (targetRestaurant?.status === 'suspended') {
+          await logout(true);
+          setErrorMessage(
+            language === 'pt'
+              ? `O restaurante "${targetRestaurant.name}" está suspenso. Por favor, contacte o suporte.`
+              : `The restaurant "${targetRestaurant.name}" is currently suspended. Please contact support.`
           );
           setIsSubmitting(false);
           return;
@@ -569,7 +594,7 @@ export default function Login() {
       // =========================================================================
 
       // Super Admin on general login
-      if ((userData?.role === 'super_admin' && !userData?.restaurantId) || userEmail === 'pcristo35@gmail.com' || isUserSuperAdmin(userEmail)) {
+      if ((userData?.role === 'super_admin' && !userData?.restaurantId && (!userData?.restaurantIds || userData.restaurantIds.length === 0)) || userEmail === 'pcristo35@gmail.com') {
         const adminName = userData?.name || firebaseUser.displayName || userEmail.split('@')[0] || 'Super Admin';
         toast.success(`Welcome back, ${adminName}! You are logged in as ${adminName}.`);
         navigate('/app/super-admin', { replace: true });
@@ -584,20 +609,7 @@ export default function Login() {
       }
 
       // Restaurant staff/admin on general login
-      let restaurantId = userData?.restaurantId || (userData?.restaurantIds && userData.restaurantIds[0]);
-
-      // If user doc didn't have restaurantId directly, check if this email is an owner in `restaurants`
-      if (!restaurantId && userEmail) {
-        try {
-          const qRest = query(collection(db, 'restaurants'), where('ownerEmail', '==', userEmail), limit(1));
-          const restSnap = await getDocs(qRest);
-          if (!restSnap.empty) {
-            restaurantId = restSnap.docs[0].id;
-          }
-        } catch (rErr) {
-          console.warn('[Login] Error querying restaurants by ownerEmail:', rErr);
-        }
-      }
+      const restaurantId = userRestaurantId;
 
       if (!restaurantId) {
         await signOut(auth);
@@ -644,7 +656,7 @@ export default function Login() {
       );
 
       const isStaffOnly = (userData?.role === 'staff' || userData?.role === 'restaurant_staff');
-      const cleanSlug = (restaurant.slug || restaurant.id).toLowerCase() === 'bella-italia' ? 'bela-italia' : (restaurant.slug || restaurant.id);
+      const cleanSlug = normalizeTenantIdentifier(restaurant.slug || restaurant.id);
       const targetBase = isStaffOnly ? `/r/${cleanSlug}/staff` : `/r/${cleanSlug}/admin`;
       navigate(targetBase, { replace: true });
     } catch (err: any) {
@@ -711,13 +723,13 @@ export default function Login() {
   };
 
   // Display texts and branding based on mode and target restaurant
-  const isRestaurantPortal = Boolean(restaurantSlug || targetRestaurant);
+  const isRestaurantPortal = Boolean(!isPlatformLoginRoute && (restaurantSlug || targetRestaurant));
 
-  const fallbackRestName = restaurantSlug
+  const fallbackRestName = (!isPlatformLoginRoute && restaurantSlug)
     ? (restaurantSlug.toLowerCase() === 'bela-italia' ? 'Bela Itália' : restaurantSlug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '))
     : '';
 
-  const siteName = restaurantSettings?.name || targetRestaurant?.name || fallbackRestName || marketingSettings?.general?.siteName || 'DineMaster Pro';
+  const siteName = (!isPlatformLoginRoute && (restaurantSettings?.name || targetRestaurant?.name || fallbackRestName)) || marketingSettings?.general?.siteName || 'DineMaster Pro';
 
   // Resolve restaurant logo from Settings, fallback to letter initial for restaurants or platform logo for SaaS
   const logoUrl = useMemo(() => {
@@ -768,8 +780,8 @@ export default function Login() {
     setLogoLoadFailed(false);
   }, [logoUrl]);
 
-  const backUrl = targetRestaurant?.slug ? `/r/${targetRestaurant.slug}` : (restaurantSlug ? `/r/${restaurantSlug}` : '/');
-  const backLabel = targetRestaurant?.name ? `← Back to ${targetRestaurant.name}` : `← Back to ${siteName}`;
+  const backUrl = (!isPlatformLoginRoute && targetRestaurant?.slug) ? `/r/${targetRestaurant.slug}` : ((!isPlatformLoginRoute && restaurantSlug) ? `/r/${restaurantSlug}` : '/');
+  const backLabel = (!isPlatformLoginRoute && targetRestaurant?.name) ? `← Back to ${targetRestaurant.name}` : `← Back to ${siteName}`;
 
   if (authLoading || (loadingRestaurant && !targetRestaurant && !restaurantSettings)) {
     return (
@@ -1241,10 +1253,24 @@ export default function Login() {
                 </Link>
               )}
 
+              <div className="pt-2">
+                <Link
+                  to="/app/super-admin"
+                  id="link-login-superadmin-portal"
+                  className="text-xs text-amber-500/80 hover:text-amber-400 transition-colors inline-flex items-center gap-1.5 font-medium"
+                >
+                  <ShieldCheck size={13} className="text-amber-400" />
+                  <span>Platform Super Administrator? Go to Super Admin Panel</span>
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
               <p className="text-[11px] text-slate-500 leading-relaxed mt-2">
                 {isAdminLogin
                   ? `Access strictly restricted to authorized staff of ${siteName}. Actions are monitored & audited.`
-                  : `Secure customer portal for ${siteName}.`}
+                  : (!isPlatformLoginRoute && restaurantSlug)
+                  ? `Secure customer portal for ${siteName}.`
+                  : `Secure authentication for DineMaster Pro hospitality platform.`}
               </p>
             </div>
           </div>

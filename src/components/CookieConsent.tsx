@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLanguage } from '../hooks/useLanguage';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
+import { Link } from 'react-router-dom';
 import { getOptimizedUrl, cn } from '../lib/utils';
 import { X, Cookie, Shield, Eye, Settings, Check } from 'lucide-react';
 import { APP_CONFIG } from '../data/appConfig';
@@ -119,7 +120,13 @@ export default function CookieConsent() {
                   "text-sm font-medium leading-relaxed",
                   isDark ? "text-gray-300" : "text-gray-600"
                 )}>
-                  {t('common.cookie_consent')}
+                  {t('common.cookie_consent')}{' '}
+                  <Link
+                    to="/cookies"
+                    className="underline text-amber-500 hover:text-amber-400 font-semibold inline-flex items-center gap-0.5 ml-1"
+                  >
+                    {language === 'pt' ? 'Saber mais' : 'Learn more'}
+                  </Link>
                 </p>
               </div>
 
@@ -223,9 +230,18 @@ export default function CookieConsent() {
                 "w-full text-xs text-center px-2 mb-6 leading-relaxed",
                 isDark ? "text-gray-400" : "text-gray-500"
               )}>
-                {language === 'pt' 
-                  ? 'Personalize o seu consentimento de cookies abaixo de acordo com as suas preferências. Cookies essenciais são sempre necessários.' 
-                  : 'Customize your cookie consent preferences below. Essential cookies are always required to proceed.'}
+                <p>
+                  {language === 'pt' 
+                    ? 'Personalize o seu consentimento de cookies abaixo de acordo com as suas preferências. Cookies essenciais são sempre necessários.' 
+                    : 'Customize your cookie consent preferences below. Essential cookies are always required to proceed.'}
+                </p>
+                <Link
+                  to="/cookies"
+                  onClick={() => setIsCustomizeOpen(false)}
+                  className="inline-block mt-1 text-amber-500 hover:underline font-semibold"
+                >
+                  {language === 'pt' ? 'Consultar a nossa Política de Cookies completa →' : 'Read our complete Cookie Policy →'}
+                </Link>
               </div>
 
               {/* Cookie Categories */}

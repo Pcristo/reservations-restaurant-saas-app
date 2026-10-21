@@ -1,5 +1,13 @@
 import { jsonResponse, errorResponse } from '../../lib/response';
-import { saveFirestoreDocRest, verifyAuthToken, createUserInAuth, lookupUserByEmail, updateUserPasswordInAuth } from '../../lib/firebaseAdmin';
+import {
+  saveFirestoreDocRest,
+  verifyAuthToken,
+  createUserInAuth,
+  lookupUserByEmail,
+  updateUserPasswordInAuth,
+  getFirestoreDocRest,
+  queryFirestoreDocsRest,
+} from '../../lib/firebaseAdmin';
 
 export async function onRequestPost(context: any) {
   try {
@@ -8,12 +16,23 @@ export async function onRequestPost(context: any) {
     const authHeader = context.request.headers.get('Authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-    // Verify token if provided
-    if (token) {
-      const authCheck = await verifyAuthToken(token, env);
-      if (!authCheck.success) {
-        return errorResponse(authCheck.error || 'Unauthorized', 401);
-      }
+    if (!token) {
+      return errorResponse('Unauthorized: Missing authentication token.', 401);
+    }
+
+    const authCheck = await verifyAuthToken(token, env);
+    if (!authCheck.success || !authCheck.uid) {
+      return errorResponse(authCheck.error || 'Unauthorized', 401);
+    }
+
+    const callerEmail = (authCheck.email || '').trim().toLowerCase();
+    const callerData = await getFirestoreDocRest('users', authCheck.uid, env, token);
+    const isSuperAdmin =
+      callerEmail === 'pcristo35@gmail.com' ||
+      (callerData && (callerData.role === 'super_admin' || callerData.role === 'superadmin') && !callerData.restaurantId);
+
+    if (!isSuperAdmin) {
+      return errorResponse('Forbidden: Only Super Administrators can create restaurant tenants.', 403);
     }
 
     const { 
@@ -32,7 +51,6 @@ export async function onRequestPost(context: any) {
       slug 
     } = body;
 
-    // Special quick action: auth lookup / password set
     if (onlyLookupAuth && ownerEmail) {
       const cleanEmail = ownerEmail.trim().toLowerCase();
       const lookup = await lookupUserByEmail(cleanEmail, env);
@@ -55,6 +73,19 @@ export async function onRequestPost(context: any) {
     const cleanSlug = (slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')) || `rest-${Date.now()}`;
     const id = cleanSlug;
     const now = new Date().toISOString();
+    const cleanOwnerEmail = ownerEmail.trim().toLowerCase();
+
+    // Prevent cross-restaurant account sharing: check if cleanOwnerEmail already belongs to another restaurant's staff/admin
+    if (cleanOwnerEmail !== 'pcristo35@gmail.com') {
+      const existingUsers = await queryFirestoreDocsRest('users', 'email', cleanOwnerEmail, env, token);
+      const conflictingDoc = existingUsers.find((uData) => {
+        const uRest = String(uData.restaurantId || (Array.isArray(uData.restaurantIds) && uData.restaurantIds[0]) || '').toLowerCase();
+        return uData.role && uData.role !== 'customer' && uRest && uRest !== id.toLowerCase();
+      });
+      if (conflictingDoc) {
+        return errorResponse('This email is already assigned to a staff or administrator account in another restaurant.', 409);
+      }
+    }
 
     let ownerUid = providedOwnerUid || '';
 
@@ -62,7 +93,7 @@ export async function onRequestPost(context: any) {
     if (ownerPassword && ownerPassword.trim()) {
       try {
         const authRes = await createUserInAuth(
-          ownerEmail.trim().toLowerCase(), 
+          cleanOwnerEmail, 
           ownerPassword.trim(), 
           (ownerName || name).trim(), 
           env
@@ -76,9 +107,8 @@ export async function onRequestPost(context: any) {
         console.warn('[CreateTenant] Error creating auth user:', authErr?.message);
       }
     } else if (!ownerUid) {
-      // Look up existing UID by email
       try {
-        const lookup = await lookupUserByEmail(ownerEmail.trim().toLowerCase(), env);
+        const lookup = await lookupUserByEmail(cleanOwnerEmail, env);
         if (lookup.success && lookup.user?.localId) {
           ownerUid = lookup.user.localId;
         }
@@ -92,7 +122,7 @@ export async function onRequestPost(context: any) {
       name: name.trim(),
       slug: cleanSlug,
       ownerId: ownerUid || 'owner',
-      ownerEmail: ownerEmail.trim().toLowerCase(),
+      ownerEmail: cleanOwnerEmail,
       ownerName: (ownerName || 'Owner').trim(),
       country: country || 'ireland',
       currency: currency || 'EUR',
@@ -118,7 +148,7 @@ export async function onRequestPost(context: any) {
         await saveFirestoreDocRest('users', ownerUid, {
           id: ownerUid,
           authUid: ownerUid,
-          email: ownerEmail.trim().toLowerCase(),
+          email: cleanOwnerEmail,
           name: (ownerName || 'Owner').trim(),
           role: 'restaurant_owner',
           restaurantId: id,
@@ -154,7 +184,7 @@ export async function onRequestPost(context: any) {
       id,
       restaurantId: id,
       name: name.trim(),
-      email: ownerEmail.trim(),
+      email: cleanOwnerEmail,
       timezone: timezone || 'Europe/Dublin',
       description: `${name.trim()} is pleased to welcome you for an exceptional dining experience.`,
       descriptionEn: `${name.trim()} is pleased to welcome you for an exceptional dining experience.`,

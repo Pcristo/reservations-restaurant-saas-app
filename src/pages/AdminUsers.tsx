@@ -1,25 +1,30 @@
 import { motion, AnimatePresence } from 'motion/react';
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { auth } from '../firebase';
 import { useUsers } from '../hooks/useUsers';
 import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../hooks/useSettings';
 import { useLanguage } from '../hooks/useLanguage';
 import { useTenantSafe } from '../hooks/useTenant';
-import { User, Shield, ShieldAlert, Trash2, Mail, Plus, X, CheckCircle2, AlertCircle, Key, Send, Pencil , MoreVertical, Settings, Lock, Unlock } from 'lucide-react';
+import { canManageRestaurant, normalizeTenantIdentifier } from '../lib/permissions';
+import { User, Shield, ShieldAlert, Trash2, Mail, Plus, X, CheckCircle2, AlertCircle, Key, Send, Pencil , MoreVertical, Settings, Lock, Unlock, AlertTriangle, Users } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { User as UserType } from '../types';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { formatResourceAllowance } from '../services/entitlementsService';
 import CustomDropdown, { DropdownOption } from '../components/CustomDropdown';
 
 export default function AdminUsers() {
   const { slug } = useParams<{ slug?: string }>();
   const tenant = useTenantSafe();
-  const { users, updateUserRole, updateUserStatus, updateUser, addUser, deleteUser, loading } = useUsers();
+  const { users, updateUserRole, updateUserStatus, updateUser, addUser, deleteUser, loading, activeStaffCount, staffLimitCheck } = useUsers();
   const { isAdmin, user: currentUser, updatePassword, resetPassword } = useAuth();
-  const currentSlug = slug || tenant?.slug || currentUser?.restaurantId || (currentUser?.restaurantIds && currentUser.restaurantIds[0]);
+  const rawSlug = slug || tenant?.slug || currentUser?.restaurantId || (currentUser?.restaurantIds && currentUser.restaurantIds[0]) || '';
+  const currentSlug = normalizeTenantIdentifier(rawSlug);
   const adminBase = currentSlug ? `/r/${currentSlug}/admin` : '/admin';
+  const isAuthorizedForThisTenant = isAdmin && canManageRestaurant(currentUser, currentSlug, tenant?.tenant);
   const { settings } = useSettings();
   const { t, language } = useLanguage();
 
@@ -75,11 +80,19 @@ export default function AdminUsers() {
   });
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserType | null>(null);
-  const [customDomain, setCustomDomain] = useState(() => localStorage.getItem('customUserDomain') || '@reservations.com');
+  const domainStorageKey = `customUserDomain_${currentSlug || 'default'}`;
+  const [customDomain, setCustomDomain] = useState(() => localStorage.getItem(domainStorageKey) || localStorage.getItem('customUserDomain') || '@reservations.com');
 
   useEffect(() => {
-    localStorage.setItem('customUserDomain', customDomain);
-  }, [customDomain]);
+    const saved = localStorage.getItem(domainStorageKey);
+    if (saved) {
+      setCustomDomain(saved);
+    }
+  }, [domainStorageKey]);
+
+  useEffect(() => {
+    localStorage.setItem(domainStorageKey, customDomain);
+  }, [customDomain, domainStorageKey]);
 
 
   const [editPassword, setEditPassword] = useState('');
@@ -111,13 +124,13 @@ export default function AdminUsers() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isAuthorizedForThisTenant) {
       navigate(adminBase);
     }
-  }, [isAdmin, navigate, adminBase]);
+  }, [isAuthorizedForThisTenant, navigate, adminBase]);
 
   if (loading) return <div className="p-8 text-center">{t('common.loading')}</div>;
-  if (!isAdmin) return null;
+  if (!isAuthorizedForThisTenant) return null;
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,10 +227,19 @@ export default function AdminUsers() {
         }
       } else {
         try {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (auth.currentUser) {
+            const token = await auth.currentUser.getIdToken();
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+          }
           const res = await fetch('/api/admin/update-password', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: userToEdit.id, newPassword: editPassword })
+            headers,
+            body: JSON.stringify({
+              uid: userToEdit.id,
+              newPassword: editPassword,
+              restaurantId: currentSlug
+            })
           });
           const data = await res.json();
           if (!data.success) {
@@ -288,8 +310,16 @@ export default function AdminUsers() {
           <h1 className="text-3xl font-bold text-gray-900">{t('nav.users')}</h1>
           <p className="text-gray-500">{t('dashboard.manage_staff')}</p>
         </div>
-        <div className="flex flex-row gap-3 items-center">
-          
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Staff Quota Allowance Indicator */}
+          <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 text-xs font-semibold text-gray-700 border border-gray-200">
+            <Users size={16} className="text-amber-600" />
+            <span>
+              {language === 'pt' ? 'Contas de Staff:' : 'Staff Accounts:'}{' '}
+              <strong className="text-gray-900">{activeStaffCount}</strong> / {formatResourceAllowance(tenant?.entitlements, 'staff', language)}
+            </span>
+          </div>
+
           <div className="relative" ref={settingsDropdownRef}>
             <button
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
@@ -331,17 +361,50 @@ export default function AdminUsers() {
                 </div>
               </motion.div>)}</AnimatePresence></div>
           <button onClick={() => {
+              if (staffLimitCheck && !staffLimitCheck.allowed) {
+                toast.error(
+                  staffLimitCheck.reasonPt ||
+                  staffLimitCheck.reason ||
+                  'Staff account limit reached. Please upgrade your subscription.'
+                );
+                return;
+              }
               const nextId = (users.length + 1).toString().padStart(3, '0');
               setNewUser(prev => ({ ...prev, staffNumber: nextId }));
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition-colors shadow-sm"
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm",
+              staffLimitCheck && !staffLimitCheck.allowed
+                ? "bg-gray-200 text-gray-400 cursor-not-allowed hover:bg-gray-200"
+                : "bg-amber-600 text-white hover:bg-amber-700 cursor-pointer"
+            )}
           >
             <Plus size={20} />
             {t('common.add_user')}
           </button>
         </div>
       </div>
+
+      {/* Staff Limit / Downgrade Banner */}
+      {staffLimitCheck && !staffLimitCheck.allowed && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+            <span>
+              {language === 'pt'
+                ? `Limite de contas de staff atingido (${staffLimitCheck.limit} membros permitidos no plano ${tenant?.plan?.name || ''}). As contas existentes continuam operacionais, mas é necessário fazer upgrade para convidar mais utilizadores.`
+                : `Staff account limit reached (${staffLimitCheck.limit} staff members allowed in the ${tenant?.plan?.name || ''} plan). Existing accounts remain operational, but upgrading is required to invite additional staff.`}
+            </span>
+          </div>
+          <Link
+            to={`${adminBase}/billing`}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold whitespace-nowrap self-start sm:self-auto shadow-xs"
+          >
+            {language === 'pt' ? 'Fazer Upgrade' : 'Upgrade Plan'}
+          </Link>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">

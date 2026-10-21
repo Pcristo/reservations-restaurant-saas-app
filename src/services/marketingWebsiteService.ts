@@ -237,52 +237,21 @@ export async function updateMarketingWebsiteSettings(
 
 /**
  * Retrieves public plans directly from the single source of truth:
- * the existing SaaS Plans & Entitlements in Firestore `plans` or `DEFAULT_PLANS`.
+ * the central SaaS Plans & Entitlements in planService (Firestore `plans` or `DEFAULT_PLANS`).
  * Filters out inactive or private plans. Never duplicates plan models.
  */
 export async function getPublicPlans(): Promise<Plan[]> {
   try {
-    const plansColl = collection(db, 'plans');
-    const snap = await getDocs(plansColl);
-    if (!snap.empty) {
-      const plansList: Plan[] = [];
-      snap.forEach((docSnap) => {
-        const data = docSnap.data() as Partial<Plan>;
-        // Respect isActive and isPublic flags if present
-        if (data.isActive !== false && data.isPublic !== false) {
-          plansList.push({
-            id: docSnap.id,
-            name: data.name || docSnap.id,
-            description: data.description || '',
-            priceMonthly: data.priceMonthly ?? 0,
-            currency: data.currency || 'EUR',
-            isPopular: Boolean(data.isPopular),
-            entitlements: {
-              maxStaffUsers: data.entitlements?.maxStaffUsers ?? 5,
-              maxTables: data.entitlements?.maxTables ?? 25,
-              maxReservations: data.entitlements?.maxReservations ?? 500,
-              customDomain: Boolean(data.entitlements?.customDomain),
-              advancedAnalytics: Boolean(data.entitlements?.advancedAnalytics),
-              whatsapp: Boolean(data.entitlements?.whatsapp),
-              sms: Boolean(data.entitlements?.sms),
-              advancedSEO: Boolean(data.entitlements?.advancedSEO),
-              waitlist: Boolean(data.entitlements?.waitlist),
-              apiAccess: Boolean(data.entitlements?.apiAccess),
-            },
-            customFeatures: Array.isArray(data.customFeatures) ? data.customFeatures : [],
-          });
-        }
-      });
-
-      if (plansList.length > 0) {
-        return plansList.sort((a, b) => a.priceMonthly - b.priceMonthly);
-      }
+    const { listAllPlans } = await import('./planService');
+    const allPlans = await listAllPlans();
+    const visible = allPlans.filter((p) => p.isActive !== false && p.isPublic !== false);
+    if (visible.length > 0) {
+      return visible;
     }
   } catch (err) {
-    console.warn('[MarketingService] Notice loading plans from Firestore, falling back to default plans:', err);
+    console.warn('[MarketingService] Notice loading plans from planService, falling back to default plans:', err);
   }
 
-  // Fallback to existing SaaS Plans & Entitlements definitions
   return DEFAULT_PLANS.filter((p) => p.isActive !== false && p.isPublic !== false);
 }
 

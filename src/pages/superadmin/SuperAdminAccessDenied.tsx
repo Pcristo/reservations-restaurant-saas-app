@@ -12,7 +12,9 @@ export const SuperAdminAccessDenied: React.FC<SuperAdminAccessDeniedProps> = ({ 
   const { user, logout, isAdmin, isStaff } = useAuth();
   const navigate = useNavigate();
 
-  const isTenantUser = !!user?.restaurantId || (isAdmin && !user?.role?.includes('super'));
+  const isMasterAdmin = (userEmail || user?.email || '').trim().toLowerCase() === 'pcristo35@gmail.com';
+
+  const isTenantUser = !isMasterAdmin && (!!user?.restaurantId || (isAdmin && !user?.role?.includes('super')));
 
   const handleSignOut = async () => {
     try {
@@ -22,6 +24,44 @@ export const SuperAdminAccessDenied: React.FC<SuperAdminAccessDeniedProps> = ({ 
       console.error('Logout error:', err);
     }
   };
+
+  if (isMasterAdmin) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 font-sans">
+        <div className="w-full max-w-md bg-slate-900/95 border border-amber-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-sm text-center">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-amber-500/5">
+            <Store size={32} />
+          </div>
+          <span className="inline-block text-[11px] font-mono uppercase tracking-wider font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 mb-3">
+            Master Super Admin
+          </span>
+          <h1 className="text-xl font-bold text-white mb-2 tracking-tight">
+            Master Super Admin Authorized
+          </h1>
+          <p className="text-sm text-slate-300 leading-relaxed mb-6">
+            You are signed in as <strong className="text-amber-400 font-mono">pcristo35@gmail.com</strong> with root platform privileges.
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('eata_active_restaurant_id');
+                navigate('/app/super-admin');
+              }}
+              className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>Enter Super Admin Panel</span>
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full py-2 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              Return to Platform Home
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 font-sans">

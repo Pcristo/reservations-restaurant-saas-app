@@ -36,6 +36,9 @@ import AdminCustomerStats from '../../pages/AdminCustomerStats';
 import PrivacyPolicy from '../../pages/PrivacyPolicy';
 import TermsAndConditions from '../../pages/TermsAndConditions';
 import CookiePolicy from '../../pages/CookiePolicy';
+import PlatformPrivacyPolicy from '../../pages/PlatformPrivacyPolicy';
+import PlatformTermsAndConditions from '../../pages/PlatformTermsAndConditions';
+import PlatformCookiePolicy from '../../pages/PlatformCookiePolicy';
 import Maintenance from '../../pages/Maintenance';
 import DevelopingApp from '../../pages/DevelopingApp';
 import Instructions from '../../pages/Instructions';
@@ -169,13 +172,13 @@ export function AppRoutes() {
     if (!authLoading && !settingsLoading) {
       const timer = setTimeout(() => {
         setShowPreloader(false);
-      }, 300);
+      }, 2200);
       return () => clearTimeout(timer);
     }
     
     const safetyTimer = setTimeout(() => {
       setShowPreloader(false);
-    }, 1500);
+    }, 3500);
 
     return () => clearTimeout(safetyTimer);
   }, [authLoading, settingsLoading]);
@@ -260,6 +263,7 @@ export function AppRoutes() {
           <Route path="restaurants" element={<SuperAdminRestaurants />} />
           <Route path="domains" element={<SuperAdminDomains />} />
           <Route path="plans" element={<SuperAdminPlans />} />
+          <Route path="packages" element={<SuperAdminPlans />} />
           <Route path="billing" element={<SuperAdminBilling />} />
           <Route path="features" element={<SuperAdminFeatureFlags />} />
           <Route path="admins" element={<SuperAdminAdmins />} />
@@ -276,6 +280,20 @@ export function AppRoutes() {
   const isAdminRoute = location.pathname.startsWith('/admin') || location.pathname.includes('/admin');
   const isStaffOrAdmin = isAdmin || isStaff;
 
+  // Determine whether current view is the main SaaS platform landing route ('/')
+  const searchParams = new URLSearchParams(location.search);
+  const isExplicitBooking = searchParams.get('view') === 'booking' || searchParams.has('restaurant');
+  const isPreviewMarketing = searchParams.get('preview') === 'true';
+  const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+  const isPlatform = isPlatformHost(host);
+  const isSubdomain = isTenantSubdomain(host);
+  const isCustomDomain = !isPlatform;
+
+  const isPlatformLanding = 
+    location.pathname === '/marketing' || 
+    isPreviewMarketing ||
+    (location.pathname === '/' && !isCustomDomain && !isSubdomain && !isExplicitBooking);
+
   // Platform Development Mode configured via Super Admin dashboard
   const isDevelopingActive = Boolean(platformSettings?.developingModeEnabled) && !developingUnlocked && !isLoginPage;
 
@@ -283,7 +301,7 @@ export function AppRoutes() {
     return (
       <>
         <AnimatePresence>
-          {showPreloader && <Preloader />}
+          {showPreloader && <Preloader isPlatform={isPlatformLanding} marketingSettings={marketingSettings} />}
         </AnimatePresence>
         <ScrollToTop />
         <DevelopingApp onUnlock={() => {
@@ -293,14 +311,6 @@ export function AppRoutes() {
       </>
     );
   }
-
-  // Determine whether current view is a restaurant customer booking route
-  const searchParams = new URLSearchParams(location.search);
-  const isExplicitBooking = searchParams.get('view') === 'booking' || searchParams.has('restaurant');
-  const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
-  const isPlatform = isPlatformHost(host);
-  const isSubdomain = isTenantSubdomain(host);
-  const isCustomDomain = !isPlatform;
 
   // Maintenance mode applies ONLY to the specific restaurant's public booking routes
   const isRestaurantRoute = location.pathname.startsWith('/r/') || 
@@ -325,7 +335,7 @@ export function AppRoutes() {
     return (
       <>
         <AnimatePresence>
-          {showPreloader && <Preloader />}
+          {showPreloader && <Preloader isPlatform={false} />}
         </AnimatePresence>
         <ScrollToTop />
         <Maintenance />
@@ -345,7 +355,7 @@ export function AppRoutes() {
     <>
       <SyncIndicator />
       <AnimatePresence>
-        {showPreloader && <Preloader />}
+        {showPreloader && <Preloader isPlatform={isPlatformLanding} marketingSettings={marketingSettings} />}
       </AnimatePresence>
       <ScrollToTop />
       <Toaster position="top-right">
@@ -373,22 +383,7 @@ export function AppRoutes() {
       <FreezeOverlay />
       <CookieConsent />
       <BookingNotificationListener />
-      {(() => {
-        const searchParams = new URLSearchParams(location.search);
-        const isExplicitBooking = searchParams.get('view') === 'booking' || searchParams.has('restaurant');
-        const isPreviewMarketing = searchParams.get('preview') === 'true';
-        const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
-        const isPlatform = isPlatformHost(host);
-        const isSubdomain = isTenantSubdomain(host);
-        const isCustomDomain = !isPlatform;
-
-        const isPlatformLanding = 
-          location.pathname === '/marketing' || 
-          isPreviewMarketing ||
-          (location.pathname === '/' && !isCustomDomain && !isSubdomain && !isExplicitBooking);
-
-        return (
-          <Layout isMarketing={isPlatformLanding}>
+      <Layout isMarketing={isPlatformLanding}>
             <AnimatePresence mode="wait">
               <Routes location={location} key={location.pathname + '-' + language}>
                 <Route path="/" element={
@@ -424,6 +419,8 @@ export function AppRoutes() {
                 <Route path="/r/:slug/admin/settings" element={<PageWrapper><ProtectedRoute role="admin"><AdminSettings /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/users" element={<PageWrapper><ProtectedRoute role="admin"><AdminUsers /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/billing" element={<PageWrapper><ProtectedRoute role="admin"><AdminBilling /></ProtectedRoute></PageWrapper>} />
+                <Route path="/r/:slug/admin/packages" element={<PageWrapper><ProtectedRoute role="admin"><AdminBilling /></ProtectedRoute></PageWrapper>} />
+                <Route path="/r/:slug/admin/plans" element={<PageWrapper><ProtectedRoute role="admin"><AdminBilling /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/instructions" element={<PageWrapper><ProtectedRoute role="staff"><Instructions /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/print/section" element={<PageWrapper><ProtectedRoute role="staff"><AdminPrintSection /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/print/section-document" element={<PageWrapper><ProtectedRoute role="staff"><AdminPrintSection /></ProtectedRoute></PageWrapper>} />
@@ -454,11 +451,11 @@ export function AppRoutes() {
                 <Route path="/domain-error" element={<DomainErrorPage />} />
                 <Route path="/suspended" element={<SuspendedRestaurantPage />} />
                 <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
-                <Route path="/privacy" element={<PageWrapper><PrivacyPolicy /></PageWrapper>} />
+                <Route path="/privacy" element={<PageWrapper><PlatformPrivacyPolicy /></PageWrapper>} />
                 <Route path="/r/:slug/privacy" element={<PageWrapper><PrivacyPolicy /></PageWrapper>} />
-                <Route path="/terms" element={<PageWrapper><TermsAndConditions /></PageWrapper>} />
+                <Route path="/terms" element={<PageWrapper><PlatformTermsAndConditions /></PageWrapper>} />
                 <Route path="/r/:slug/terms" element={<PageWrapper><TermsAndConditions /></PageWrapper>} />
-                <Route path="/cookies" element={<PageWrapper><CookiePolicy /></PageWrapper>} />
+                <Route path="/cookies" element={<PageWrapper><PlatformCookiePolicy /></PageWrapper>} />
                 <Route path="/r/:slug/cookies" element={<PageWrapper><CookiePolicy /></PageWrapper>} />
                 
                 {/* Customer Routes */}
@@ -481,8 +478,6 @@ export function AppRoutes() {
               </Routes>
             </AnimatePresence>
           </Layout>
-        );
-      })()}
     </>
   );
 }

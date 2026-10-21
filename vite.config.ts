@@ -115,8 +115,18 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      sourcemap: false,
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+            'vendor-mui': ['@mui/material', '@mui/x-date-pickers', '@emotion/react', '@emotion/styled'],
+            'vendor-charts': ['recharts'],
+          },
+        },
+      },
     },
   };
 });

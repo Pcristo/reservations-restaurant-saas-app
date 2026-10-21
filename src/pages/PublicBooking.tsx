@@ -17,6 +17,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { loadReCaptcha, executeReCaptcha } from '../lib/recaptcha';
 import { APP_CONFIG } from '../data/appConfig';
 import { SEOHead } from '../components/SEOHead';
+import { useFeatureFlags } from '../services/featureFlagsService';
+import { isPackageFeatureEnabled } from '../services/entitlementsService';
 
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
@@ -35,8 +37,11 @@ export default function PublicBooking() {
     }
   }, [location]);
   const { settings, loading: settingsLoading } = useSettings();
+  const { isFeatureEnabled } = useFeatureFlags();
   const tenantCtx = useTenantSafe();
   const tenant = tenantCtx?.tenant;
+  const waitlistEnabled = isFeatureEnabled('waitlist_management') && isPackageFeatureEnabled(tenantCtx?.entitlements, 'waitlist');
+  const smsVerificationActive = Boolean(settings?.phoneVerificationEnabled) && isFeatureEnabled('sms_notifications') && isPackageFeatureEnabled(tenantCtx?.entitlements, 'sms');
   const { tables, areas = [], loading: tablesLoading } = useTables();
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
@@ -71,6 +76,7 @@ export default function PublicBooking() {
   const [guests, setGuests] = useState(2);
 
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [isJoiningWaitlist, setIsJoiningWaitlist] = useState(false);
   const [bookingStatus, setBookingStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [copiedRef, setCopiedRef] = useState(false);
   const [showClosedModal, setShowClosedModal] = useState(false);
@@ -242,7 +248,7 @@ export default function PublicBooking() {
   }, [user]);
 
   useEffect(() => {
-    if (settings?.phoneVerificationEnabled) {
+    if (smsVerificationActive) {
       if (user && user.role === 'customer' && profilePhoneVerified && formData.phone === profilePhone && profilePhone) {
         setIsPhoneVerified(true);
       } else {
@@ -252,7 +258,7 @@ export default function PublicBooking() {
         setVerificationError('');
       }
     }
-  }, [formData.phone, settings?.phoneVerificationEnabled, profilePhoneVerified, profilePhone, user]);
+  }, [formData.phone, smsVerificationActive, profilePhoneVerified, profilePhone, user]);
 
   const handleSendCode = async () => {
     if (!formData.phone) {
@@ -710,7 +716,7 @@ export default function PublicBooking() {
       return;
     }
 
-    if (settings?.phoneVerificationEnabled && !isPhoneVerified) {
+    if (smsVerificationActive && !isPhoneVerified) {
       toast.error(language === 'pt' 
         ? 'Por favor, verifique o seu número de telefone por SMS primeiro.' 
         : 'Please verify your phone number via SMS first.');
@@ -939,6 +945,17 @@ export default function PublicBooking() {
         chosenTable = availableTables[0];
       }
 
+      const shouldJoinWaitlist = isJoiningWaitlist || !chosenTable;
+      if (shouldJoinWaitlist && !waitlistEnabled) {
+        toast.error(
+          language === 'pt'
+            ? 'Não existem mesas disponíveis para o horário selecionado.'
+            : 'No tables available for the selected time.'
+        );
+        setBookingStatus('idle');
+        return;
+      }
+
       const reservationData: any = {
         customerName: formData.name,
         customerPhone: formData.phone,
@@ -946,11 +963,12 @@ export default function PublicBooking() {
         date,
         time: selectedTime,
         guests,
-        tableId: chosenTable?.id || '',
+        tableId: shouldJoinWaitlist ? '' : (chosenTable?.id || ''),
         notes: formData.notes,
-        status: 'booked',
+        status: shouldJoinWaitlist ? 'waiting-list' : 'booked',
+        isWaitlist: shouldJoinWaitlist,
         source: (isAdmin || isStaff) ? 'admin' : 'public',
-        verifyTableNumber: needsVerifyTableNumber,
+        verifyTableNumber: shouldJoinWaitlist ? false : needsVerifyTableNumber,
         preferredTableUnavailable,
         isRegularCustomer: isCustomerRegular,
         language: language === 'pt' ? 'pt' : 'en'
@@ -1580,6 +1598,24 @@ export default function PublicBooking() {
                                 <p className="text-[11px] text-red-700 mt-1">
                                   {t('res.full_house_desc')}
                                 </p>
+                                {waitlistEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const eff = getEffectiveOpeningHours(date, settings);
+                                      setSelectedTime(eff.lunch?.open || '12:30');
+                                      setIsJoiningWaitlist(true);
+                                    }}
+                                    className={cn(
+                                      "mt-3 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                                      isJoiningWaitlist && selectedTime === (getEffectiveOpeningHours(date, settings).lunch?.open || '12:30')
+                                        ? "bg-amber-600 text-white shadow-md"
+                                        : "bg-white text-amber-700 border border-amber-300 hover:bg-amber-50"
+                                    )}
+                                  >
+                                    {language === 'pt' ? 'Entrar na Lista de Espera (Almoço)' : 'Join Waiting List (Lunch)'}
+                                  </button>
+                                )}
                               </div>
                             ) : availableSlots.lunch.length > 0 ? (
                               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
@@ -1587,10 +1623,13 @@ export default function PublicBooking() {
                                   <button
                                     key={time}
                                     type="button"
-                                    onClick={() => setSelectedTime(time)}
+                                    onClick={() => {
+                                      setSelectedTime(time);
+                                      setIsJoiningWaitlist(false);
+                                    }}
                                     className={cn(
                                       "py-2 px-1 rounded-lg text-[13px] font-bold border transition-all",
-                                      selectedTime === time
+                                      selectedTime === time && !isJoiningWaitlist
                                         ? "bg-amber-600 text-white border-amber-600 shadow-md scale-105"
                                         : "bg-white text-gray-700 border-gray-200 hover:border-amber-500 hover:text-amber-600"
                                     )}
@@ -1608,6 +1647,24 @@ export default function PublicBooking() {
                                 <p className="text-[11px] text-red-700 mt-1">
                                   {t('res.full_house_desc')}
                                 </p>
+                                {waitlistEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const eff = getEffectiveOpeningHours(date, settings);
+                                      setSelectedTime(eff.lunch?.open || '12:30');
+                                      setIsJoiningWaitlist(true);
+                                    }}
+                                    className={cn(
+                                      "mt-3 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                                      isJoiningWaitlist && selectedTime === (getEffectiveOpeningHours(date, settings).lunch?.open || '12:30')
+                                        ? "bg-amber-600 text-white shadow-md"
+                                        : "bg-white text-amber-700 border border-amber-300 hover:bg-amber-50"
+                                    )}
+                                  >
+                                    {language === 'pt' ? 'Entrar na Lista de Espera (Almoço)' : 'Join Waiting List (Lunch)'}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1636,6 +1693,24 @@ export default function PublicBooking() {
                                 <p className="text-[11px] text-red-700 mt-1">
                                   {t('res.full_house_desc')}
                                 </p>
+                                {waitlistEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const eff = getEffectiveOpeningHours(date, settings);
+                                      setSelectedTime(eff.dinner?.open || '19:30');
+                                      setIsJoiningWaitlist(true);
+                                    }}
+                                    className={cn(
+                                      "mt-3 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                                      isJoiningWaitlist && selectedTime === (getEffectiveOpeningHours(date, settings).dinner?.open || '19:30')
+                                        ? "bg-indigo-600 text-white shadow-md"
+                                        : "bg-white text-indigo-700 border border-indigo-300 hover:bg-indigo-50"
+                                    )}
+                                  >
+                                    {language === 'pt' ? 'Entrar na Lista de Espera (Jantar)' : 'Join Waiting List (Dinner)'}
+                                  </button>
+                                )}
                               </div>
                             ) : availableSlots.dinner.length > 0 ? (
                               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
@@ -1643,10 +1718,13 @@ export default function PublicBooking() {
                                   <button
                                     key={time}
                                     type="button"
-                                    onClick={() => setSelectedTime(time)}
+                                    onClick={() => {
+                                      setSelectedTime(time);
+                                      setIsJoiningWaitlist(false);
+                                    }}
                                     className={cn(
                                       "py-2 px-1 rounded-lg text-[13px] font-bold border transition-all",
-                                      selectedTime === time
+                                      selectedTime === time && !isJoiningWaitlist
                                         ? "bg-indigo-600 text-white border-indigo-600 shadow-md scale-105"
                                         : "bg-white text-gray-700 border-gray-200 hover:border-indigo-500 hover:text-indigo-600"
                                     )}
@@ -1664,6 +1742,24 @@ export default function PublicBooking() {
                                 <p className="text-[11px] text-red-700 mt-1">
                                   {t('res.full_house_desc')}
                                 </p>
+                                {waitlistEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const eff = getEffectiveOpeningHours(date, settings);
+                                      setSelectedTime(eff.dinner?.open || '19:30');
+                                      setIsJoiningWaitlist(true);
+                                    }}
+                                    className={cn(
+                                      "mt-3 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                                      isJoiningWaitlist && selectedTime === (getEffectiveOpeningHours(date, settings).dinner?.open || '19:30')
+                                        ? "bg-indigo-600 text-white shadow-md"
+                                        : "bg-white text-indigo-700 border border-indigo-300 hover:bg-indigo-50"
+                                    )}
+                                  >
+                                    {language === 'pt' ? 'Entrar na Lista de Espera (Jantar)' : 'Join Waiting List (Dinner)'}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1789,7 +1885,7 @@ export default function PublicBooking() {
                       />
                     </div>
 
-                    {settings?.phoneVerificationEnabled && (
+                    {smsVerificationActive && (
                       <div className="mt-2">
                         {isPhoneVerified ? (
                           <div className="flex items-center gap-2 text-xs text-emerald-800 font-bold p-2.5 rounded-lg bg-white border border-emerald-300 shadow-sm">

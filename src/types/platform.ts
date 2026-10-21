@@ -80,4 +80,17 @@ export interface PlatformSettings {
     advancedFloorPlans: boolean;
     api: boolean;
   };
+
+  // Legal Entity & Regulatory Details (Single Source of Truth for Platform Legal Pages)
+  legalCompanyName?: string;
+  companyRegistrationNumber?: string;
+  vatNumber?: string;
+  registeredAddress?: string;
+  contactPhone?: string;
+  legalContactEmail?: string;
+  dpoContactEmail?: string;
+  primaryJurisdiction?: 'ireland' | 'portugal' | 'both';
+  disputeResolutionPlatform?: string;
+  lastLegalReviewDate?: string;
 }
+

@@ -1,17 +1,76 @@
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
+import { useLocation } from 'react-router-dom';
+import { Utensils } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useLanguage } from '../hooks/useLanguage';
-import { getOptimizedUrl, cn } from '../lib/utils';
+import { getOptimizedUrl, cn, isPlatformHost, isTenantSubdomain } from '../lib/utils';
 import { APP_CONFIG } from '../data/appConfig';
+import { MarketingWebsiteSettings } from '../types';
+import { getMarketingWebsiteSettings, DEFAULT_MARKETING_SETTINGS } from '../services/marketingWebsiteService';
 import zarcoLogo1 from '../assets/developer/zarco_logo_1_no_bg.png';
 
-const Preloader: React.FC = () => {
+interface PreloaderProps {
+  isPlatform?: boolean;
+  marketingSettings?: MarketingWebsiteSettings | null;
+}
+
+const Preloader: React.FC<PreloaderProps> = ({ 
+  isPlatform: isPlatformProp,
+  marketingSettings: marketingSettingsProp
+}) => {
+  const location = useLocation();
   const { settings, loading } = useSettings();
   const { language, t } = useLanguage();
-  const logo = settings?.logoUrl || (settings?.useCloudinary && settings?.cloudinaryLogoUrl);
+
+  // Determine if this is the main platform route ('/') rather than an individual restaurant portal
+  const isPlatformRoute = useMemo(() => {
+    if (isPlatformProp !== undefined) return isPlatformProp;
+    const searchParams = new URLSearchParams(location.search);
+    const isExplicitBooking = searchParams.get('view') === 'booking' || searchParams.has('restaurant');
+    const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+    const isPlatform = isPlatformHost(host);
+    const isSubdomain = isTenantSubdomain(host);
+    const isCustomDomain = !isPlatform;
+
+    return (
+      (location.pathname === '/' || location.pathname === '/marketing' || location.pathname === '/login') &&
+      !isCustomDomain &&
+      !isSubdomain &&
+      !isExplicitBooking
+    );
+  }, [isPlatformProp, location.pathname, location.search]);
+
+  // Marketing settings for platform branding (exact match to main Login form)
+  const [marketingSettings, setMarketingSettings] = useState<MarketingWebsiteSettings>(() => {
+    if (marketingSettingsProp) return marketingSettingsProp;
+    try {
+      const cached = localStorage.getItem('dinemaster_marketing_settings');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return DEFAULT_MARKETING_SETTINGS;
+  });
+
+  useEffect(() => {
+    if (marketingSettingsProp) {
+      setMarketingSettings(marketingSettingsProp);
+      return;
+    }
+    if (isPlatformRoute) {
+      getMarketingWebsiteSettings()
+        .then(setMarketingSettings)
+        .catch((e) => console.warn('[Preloader] Notice loading platform marketing settings:', e));
+    }
+  }, [marketingSettingsProp, isPlatformRoute]);
+
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const platformLogoUrl = marketingSettings?.general?.logoUrl || null;
+  const restaurantLogo = settings?.logoUrl || (settings?.useCloudinary && settings?.cloudinaryLogoUrl);
 
   const getBgClass = () => {
+    if (isPlatformRoute) {
+      return "bg-slate-950";
+    }
     const bgType = settings?.preloaderBg || 'white';
     if (bgType === 'dark') {
       return "bg-[#030f20]";
@@ -23,6 +82,9 @@ const Preloader: React.FC = () => {
   };
 
   const getInlineStyle = () => {
+    if (isPlatformRoute) {
+      return {};
+    }
     const bgType = settings?.preloaderBg || 'white';
     if (bgType === 'brand' && settings?.primaryColor) {
       return { backgroundColor: settings.primaryColor };
@@ -36,7 +98,7 @@ const Preloader: React.FC = () => {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
       className={cn(
-        "fixed inset-0 z-[9999] flex items-center justify-center",
+        "fixed inset-0 z-[9999] flex items-center justify-center select-none",
         getBgClass()
       )}
       style={getInlineStyle()}
@@ -56,7 +118,7 @@ const Preloader: React.FC = () => {
           className="absolute inset-[-11px] border-2 border-amber-400 border-b-transparent rounded-full opacity-50"
         />
 
-        {/* Logo Container (No square box background) */}
+        {/* Logo Container */}
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -66,19 +128,43 @@ const Preloader: React.FC = () => {
           }}
           className="w-32 h-32 flex items-center justify-center p-2 z-10"
         >
-          {loading ? (
-            <div className="w-8 h-8 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
-          ) : logo ? (
-            <img 
-              src={getOptimizedUrl(settings?.logoUrl, settings, 'logo')} 
-              alt={settings?.name || "Logo"} 
-              className="max-w-full max-h-full object-contain"
-              referrerPolicy="no-referrer"
-            />
+          {isPlatformRoute ? (
+            /* Main DineMaster Pro platform logo (exact same as main Login form) */
+            platformLogoUrl && !logoLoadFailed ? (
+              <div className="w-[110px] h-[110px] rounded-2xl border border-slate-800 shadow-xl shadow-amber-500/10 overflow-hidden bg-slate-900 flex items-center justify-center p-2">
+                <img 
+                  src={platformLogoUrl} 
+                  alt="DineMaster Pro" 
+                  className="max-w-full max-h-full w-auto object-contain"
+                  onError={() => setLogoLoadFailed(true)}
+                />
+              </div>
+            ) : (
+              <div 
+                className="w-[110px] h-[110px] rounded-2xl flex items-center justify-center text-slate-950 font-black text-5xl shadow-lg shadow-amber-500/20"
+                style={{
+                  background: 'linear-gradient(to top right, #f59e0b, #fbbf24, #fcd34d)'
+                }}
+              >
+                <Utensils size={44} className="text-slate-950" />
+              </div>
+            )
           ) : (
-            <div className="text-2xl font-black text-amber-600 italic">
-              {settings?.name?.charAt(0) || "D"}
-            </div>
+            /* Restaurant-specific preloader */
+            loading ? (
+              <div className="w-8 h-8 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+            ) : restaurantLogo ? (
+              <img 
+                src={getOptimizedUrl(settings?.logoUrl, settings, 'logo')} 
+                alt={settings?.name || "Logo"} 
+                className="max-w-full max-h-full object-contain"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="text-2xl font-black text-amber-600 italic">
+                {settings?.name?.charAt(0) || "D"}
+              </div>
+            )
           )}
         </motion.div>
 
@@ -114,19 +200,19 @@ const Preloader: React.FC = () => {
       >
         <span className={cn(
           "text-xs font-bold tracking-wider uppercase",
-          settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
+          isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
         )}>
           {APP_CONFIG.appName}
         </span>
         <div className={cn(
-          "flex items-center justify-center gap-1.5 text-[12px] font-medium scale-[1.08]", // Increased text size and overall scale by 8%
-          settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
+          "flex items-center justify-center gap-1.5 text-[12px] font-medium scale-[1.08]",
+          isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
         )}>
           <span>{language === 'pt' ? 'Desenvolvido por' : 'Developed by'}</span>
           <img 
             src={zarcoLogo1} 
             alt="Zarco" 
-            className="h-5 sm:h-[22px] w-auto object-contain opacity-85 scale-[1.06] origin-left inline-block"
+            className="h-[23px] sm:h-[25.3px] w-auto object-contain opacity-85 scale-[1.15] origin-left inline-block"
             referrerPolicy="no-referrer"
           />
         </div>

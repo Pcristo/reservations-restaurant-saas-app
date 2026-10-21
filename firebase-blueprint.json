@@ -171,7 +171,17 @@
         "twilioPhoneNumber": { "type": "string" },
         "cloudinaryCloudName": { "type": "string" },
         "cloudinaryApiKey": { "type": "string" },
-        "cloudinaryApiSecret": { "type": "string" }
+        "cloudinaryApiSecret": { "type": "string" },
+        "legalCompanyName": { "type": "string" },
+        "companyRegistrationNumber": { "type": "string" },
+        "vatNumber": { "type": "string" },
+        "registeredAddress": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "legalContactEmail": { "type": "string" },
+        "dpoContactEmail": { "type": "string" },
+        "primaryJurisdiction": { "type": "string" },
+        "disputeResolutionPlatform": { "type": "string" },
+        "lastLegalReviewDate": { "type": "string" }
       }
     }
   },

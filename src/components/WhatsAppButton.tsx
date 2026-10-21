@@ -2,6 +2,9 @@ import React from 'react';
 import { MessageCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatWhatsAppNumber } from '../utils/whatsapp';
+import { useFeatureFlags } from '../services/featureFlagsService';
+import { useTenantSafe } from '../hooks/useTenant';
+import { isPackageFeatureEnabled } from '../services/entitlementsService';
 
 interface WhatsAppButtonProps {
   phone: string | undefined | null;
@@ -22,6 +25,17 @@ export const WhatsAppButton: React.FC<WhatsAppButtonProps> = ({
   className,
   iconSize = 16,
 }) => {
+  const { isFeatureEnabled } = useFeatureFlags();
+  const tenantCtx = useTenantSafe();
+
+  // Respect platform feature flag and restaurant package entitlement in real-time
+  const isPlatformEnabled = isFeatureEnabled('whatsapp_actions');
+  const isEntitled = isPackageFeatureEnabled(tenantCtx?.entitlements, 'whatsapp');
+
+  if (!isPlatformEnabled || !isEntitled) {
+    return null;
+  }
+
   const formattedNumber = formatWhatsAppNumber(phone, region, defaultCountryCode);
 
   const title = language === 'pt' 
@@ -56,3 +70,5 @@ export const WhatsAppButton: React.FC<WhatsAppButtonProps> = ({
     </a>
   );
 };
+
+export default WhatsAppButton;

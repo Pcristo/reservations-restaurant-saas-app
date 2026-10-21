@@ -13,11 +13,11 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteDoc, or, serverTimestamp, limit } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { auth, db } from '../firebase';
 import { User, UserRole } from '../types';
-import { isUserSuperAdmin } from '../lib/permissions';
+import { isUserSuperAdmin, doesUserBelongToRestaurant, normalizeTenantIdentifier, isCustomerRole } from '../lib/permissions';
 import { useLanguage } from './useLanguage';
 import { ShieldAlert, Copy, Check, ExternalLink, X, Globe } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -39,6 +39,25 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Helper to extract the active target restaurant slug from current URL path or query string
+ */
+function getUrlTargetRestaurantSlug(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return normalizeTenantIdentifier(match[1]);
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const restParam = params.get('restaurant');
+    if (restParam && restParam.trim()) {
+      return normalizeTenantIdentifier(restParam);
+    }
+  } catch {}
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -46,36 +65,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!cachedStr) return null;
       const cached = JSON.parse(cachedStr) as User;
 
-      // URL Tenant Session Isolation on initial load:
-      // If current route is restaurant-specific (/r/:slug), ensure session belongs to this restaurant
       if (typeof window !== 'undefined') {
-        const match = window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
-        if (match && match[1]) {
-          const rawSlug = match[1].toLowerCase();
-          const targetSlug = rawSlug === 'bella-italia' ? 'bela-italia' : rawSlug;
-          const isSuper = isUserSuperAdmin(cached);
+        const isSuper = isUserSuperAdmin(cached);
+        if (!isSuper && !isCustomerRole(cached.role)) {
+          // Staff and Restaurant Admin accounts MUST have a valid restaurant assignment
+          const hasRestAssignment = Boolean(
+            cached.restaurantId || (Array.isArray(cached.restaurantIds) && cached.restaurantIds.length > 0)
+          );
+          if (!hasRestAssignment) {
+            try {
+              localStorage.removeItem('cached_user_profile');
+              localStorage.removeItem('eata_active_restaurant_id');
+              sessionStorage.removeItem('eata_active_restaurant_id');
+            } catch {}
+            return null;
+          }
 
-          if (!isSuper) {
-            const userRest = (cached.restaurantId || (cached.restaurantIds && cached.restaurantIds[0]) || '').toLowerCase();
-            const normalizedUserRest = userRest === 'bella-italia' ? 'bela-italia' : userRest;
-            const userRestIds = (cached.restaurantIds || []).map(id => {
-              const lower = id.toLowerCase();
-              return lower === 'bella-italia' ? 'bela-italia' : lower;
-            });
-            const isStaffOrAdminUser = cached.role !== 'customer' || Boolean(userRest);
-
-            if (isStaffOrAdminUser && userRest) {
-              const isMatch = normalizedUserRest === targetSlug || userRestIds.includes(targetSlug);
-              if (!isMatch) {
-                // Tenant mismatch: user belongs to another restaurant! Terminate immediately
-                try {
-                  localStorage.removeItem('cached_user_profile');
-                  localStorage.removeItem('eata_active_restaurant_id');
-                  sessionStorage.removeItem('eata_active_restaurant_id');
-                } catch {}
-                return null;
-              }
-            }
+          // URL Tenant Session Isolation on initial load:
+          // If current route is restaurant-specific (/r/:slug), ensure session belongs to this restaurant
+          const targetSlug = getUrlTargetRestaurantSlug();
+          if (targetSlug && !doesUserBelongToRestaurant(cached, targetSlug)) {
+            try {
+              localStorage.removeItem('cached_user_profile');
+              localStorage.removeItem('eata_active_restaurant_id');
+              sessionStorage.removeItem('eata_active_restaurant_id');
+            } catch {}
+            return null;
           }
         }
       }
@@ -160,12 +175,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {}
 
       // 4. If still missing phone or name, check users/{uid} collection
+      let existingUserDocData: any = null;
       try {
         const userDocSnap = await getDoc(doc(db, 'users', uid));
         if (userDocSnap.exists()) {
-          const uData = userDocSnap.data();
-          if (uData.phone && !existingData.phone) existingData.phone = uData.phone;
-          if (uData.name && !existingData.name) existingData.name = uData.name;
+          existingUserDocData = userDocSnap.data();
+          if (existingUserDocData.phone && !existingData.phone) existingData.phone = existingUserDocData.phone;
+          if (existingUserDocData.name && !existingData.name) existingData.name = existingUserDocData.name;
         }
       } catch (e) {}
 
@@ -193,16 +209,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Always save canonical customer record
       await setDoc(doc(db, 'customers', uid), finalCustomerData, { merge: true });
 
-      // Mirror customer user record in users/{uid}
-      await setDoc(doc(db, 'users', uid), {
-        id: uid,
-        authUid: uid,
-        email: finalCustomerData.email,
-        name: finalCustomerData.name,
-        phone: finalCustomerData.phone,
-        role: 'customer',
-        status: 'active'
-      }, { merge: true });
+      // Mirror customer user record in users/{uid} ONLY if not already a staff/admin user
+      if (!existingUserDocData || isCustomerRole(existingUserDocData.role)) {
+        await setDoc(doc(db, 'users', uid), {
+          id: uid,
+          authUid: uid,
+          email: finalCustomerData.email,
+          name: finalCustomerData.name,
+          phone: finalCustomerData.phone,
+          role: 'customer',
+          status: 'active'
+        }, { merge: true });
+      }
 
       // Link reservations with this email to customerUid
       if (email) {
@@ -274,9 +292,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               id: firebaseUser.uid,
               authUid: firebaseUser.uid,
               email: firebaseUser.email || 'pcristo35@gmail.com',
-              name: firebaseUser.displayName || 'Admin',
+              name: firebaseUser.displayName || 'Master Super Admin',
               role: 'super_admin',
               status: 'active',
+              restaurantId: undefined,
+              restaurantIds: [],
               authProvider: currentAuthProvider
             };
 
@@ -284,14 +304,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.removeItem('intendedRole');
             setLoading(false);
 
-            // Keep user document updated in Firestore at users/{uid}
             try {
               await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...adminUser,
                 id: firebaseUser.uid,
                 authUid: firebaseUser.uid,
+                email: firebaseUser.email || 'pcristo35@gmail.com',
+                name: firebaseUser.displayName || 'Master Super Admin',
                 role: 'super_admin',
                 status: 'active',
+                restaurantId: null,
+                restaurantIds: [],
                 authProvider: currentAuthProvider
               }, { merge: true });
             } catch (e) {
@@ -301,7 +323,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
               if (snap.exists()) {
                 const liveData = snap.data();
-                updateUserWithCache({ id: snap.id, ...liveData, role: 'super_admin', authProvider: currentAuthProvider } as User);
+                updateUserWithCache({
+                  id: snap.id,
+                  ...liveData,
+                  role: 'super_admin',
+                  restaurantId: undefined,
+                  restaurantIds: [],
+                  authProvider: currentAuthProvider
+                } as User);
               }
             }, (err) => {
               console.warn('Admin profile listener warning:', err);
@@ -309,11 +338,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
           }
 
-          // 2. CHECK IF USER IS IN `users` COLLECTION (Staff / Other Admins)
+          // 2. CHECK IF USER IS IN `users` COLLECTION (Staff / Restaurant Admins / Super Admins)
           let staffDocSnap: any = null;
+          const isNonCustomerDoc = (d: any) => d && d.role && d.role !== 'customer';
+
           try {
             const directDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            if (directDoc.exists()) {
+            if (directDoc.exists() && isNonCustomerDoc(directDoc.data())) {
               staffDocSnap = directDoc;
             }
           } catch (e) {}
@@ -322,8 +353,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const qAuth = query(collection(db, 'users'), where('authUid', '==', firebaseUser.uid));
               const snapAuth = await getDocs(qAuth);
-              if (!snapAuth.empty) {
-                staffDocSnap = snapAuth.docs[0];
+              const validAuthDoc = snapAuth.docs.find(d => isNonCustomerDoc(d.data()));
+              if (validAuthDoc) {
+                staffDocSnap = validAuthDoc;
               }
             } catch (e) {}
           }
@@ -332,14 +364,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const qEmail = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
               const snapEmail = await getDocs(qEmail);
-              if (!snapEmail.empty) {
-                staffDocSnap = snapEmail.docs[0];
-              } else {
+              let candidates = snapEmail.docs.filter(d => isNonCustomerDoc(d.data()));
+              if (candidates.length === 0) {
                 const qEmailLower = query(collection(db, 'users'), where('email', '==', userEmail));
                 const snapEmailLower = await getDocs(qEmailLower);
-                if (!snapEmailLower.empty) {
-                  staffDocSnap = snapEmailLower.docs[0];
-                }
+                candidates = snapEmailLower.docs.filter(d => isNonCustomerDoc(d.data()));
+              }
+              if (candidates.length > 0) {
+                // Prefer the record matching the current URL restaurant slug if multiple exist, or the one matching uid
+                const targetSlug = getUrlTargetRestaurantSlug();
+                const matchedByTenant = targetSlug
+                  ? candidates.find(d => doesUserBelongToRestaurant({ id: d.id, ...d.data() } as User, targetSlug))
+                  : null;
+                staffDocSnap = matchedByTenant || candidates.find(d => d.id === firebaseUser.uid) || candidates[0];
               }
             } catch (e) {}
           }
@@ -350,7 +387,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               let isInvitedSuperAdmin = false;
               let invitedName = '';
 
-              // Check localStorage cached super admin emails
               try {
                 const cachedSuperAdmins = localStorage.getItem('dinemaster_superadmin_emails');
                 if (cachedSuperAdmins) {
@@ -361,7 +397,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
               } catch {}
 
-              // Check super_admin_invitations collection
               if (!isInvitedSuperAdmin) {
                 try {
                   const qInv = query(
@@ -418,10 +453,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // If found in `users` (Staff / Admin)
+          // If found in `users` (Staff / Admin / Super Admin)
           if (staffDocSnap && staffDocSnap.exists()) {
             const userData = staffDocSnap.data() as User;
-            if (userData.status === 'inactive') {
+            if (userData.status === 'inactive' || userData.status === 'suspended') {
               await signOut(auth);
               updateUserWithCache(null);
               toast.error(t('common.account_suspended') || 'Account suspended');
@@ -429,23 +464,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
+            let resolvedRestId = userData.restaurantId || (userData.restaurantIds && userData.restaurantIds[0]);
+            let resolvedRestIds = userData.restaurantIds || (resolvedRestId ? [resolvedRestId] : []);
+
+            // If this is not a Super Admin and restaurantId is missing on the user doc, check if they own a restaurant
+            const isSuper = (userData.role === 'super_admin' || (userData.role as string) === 'superadmin') && !resolvedRestId;
+            if (!isSuper && !resolvedRestId && userEmail) {
+              try {
+                const qRest = query(collection(db, 'restaurants'), where('ownerEmail', '==', userEmail), limit(1));
+                const snapRest = await getDocs(qRest);
+                if (!snapRest.empty) {
+                  resolvedRestId = snapRest.docs[0].id;
+                  resolvedRestIds = [resolvedRestId];
+                }
+              } catch {}
+            }
+
+            // Strict validation: Every restaurant staff/admin MUST be associated with a restaurant
+            if (!isSuper && !resolvedRestId) {
+              console.warn(`[useAuth] Rejecting staff/admin account ${userEmail} without restaurant assignment.`);
+              await signOut(auth);
+              updateUserWithCache(null);
+              setLoading(false);
+              return;
+            }
+
             const staffUser: User = {
               ...userData,
-              id: staffDocSnap.id,
+              id: firebaseUser.uid,
               authUid: firebaseUser.uid,
-              email: userData.email || firebaseUser.email || '',
+              email: (userData.email || firebaseUser.email || '').trim().toLowerCase(),
               name: userData.name || firebaseUser.displayName || 'Staff Member',
-              role: userData.role || 'staff',
+              role: isSuper ? 'super_admin' : (userData.role === 'super_admin' ? 'admin' : (userData.role || 'staff')),
               status: userData.status || 'active',
-              restaurantId: userData.restaurantId || (userData.restaurantIds && userData.restaurantIds[0]),
-              restaurantIds: userData.restaurantIds,
+              ...(resolvedRestId ? { restaurantId: resolvedRestId, restaurantIds: resolvedRestIds } : {}),
               permissions: userData.permissions,
               staffNumber: userData.staffNumber,
               authProvider: currentAuthProvider
             };
 
-            // Ensure document at users/{uid} is synced
-            if (staffDocSnap.id !== firebaseUser.uid || !userData.authUid) {
+            // Enforce tenant session isolation against current URL BEFORE persisting or caching session
+            if (!isSuper) {
+              const targetSlug = getUrlTargetRestaurantSlug();
+              if (targetSlug && !doesUserBelongToRestaurant(staffUser, targetSlug)) {
+                console.warn(`[useAuth] Staff/Admin user ${staffUser.email} belongs to ${staffUser.restaurantId} but is visiting ${targetSlug}. Rejecting cross-tenant session.`);
+                await signOut(auth);
+                updateUserWithCache(null);
+                setLoading(false);
+                return;
+              }
+            }
+
+            // Ensure canonical document at users/{uid} is synced
+            if (staffDocSnap.id !== firebaseUser.uid || !userData.authUid || (!userData.restaurantId && resolvedRestId)) {
               try {
                 await setDoc(doc(db, 'users', firebaseUser.uid), {
                   ...staffUser,
@@ -458,33 +529,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             }
 
-            // Enforce tenant session isolation against current URL
-            if (typeof window !== 'undefined') {
-              const match = window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
-              if (match && match[1]) {
-                const rawSlug = match[1].toLowerCase();
-                const targetSlug = rawSlug === 'bella-italia' ? 'bela-italia' : rawSlug;
-                const userRest = (staffUser.restaurantId || (staffUser.restaurantIds && staffUser.restaurantIds[0]) || '').toLowerCase();
-                const normalizedUserRest = userRest === 'bella-italia' ? 'bela-italia' : userRest;
-                const userRestIds = (staffUser.restaurantIds || []).map(id => id.toLowerCase() === 'bella-italia' ? 'bela-italia' : id.toLowerCase());
-                
-                if (userRest && normalizedUserRest !== targetSlug && !userRestIds.includes(targetSlug)) {
-                  console.warn(`[useAuth] Staff user ${staffUser.email} belongs to ${userRest} but is visiting ${targetSlug}. Rejecting cross-tenant session.`);
-                  await signOut(auth);
-                  updateUserWithCache(null);
-                  setLoading(false);
-                  return;
-                }
-              }
-            }
-
             updateUserWithCache(staffUser);
             localStorage.removeItem('intendedRole');
             setLoading(false);
 
-            unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
+            unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), async (snap) => {
               if (snap.exists()) {
-                updateUserWithCache({ id: snap.id, ...snap.data(), authProvider: currentAuthProvider } as User);
+                const liveData = snap.data() as User;
+                if (liveData.status === 'inactive' || liveData.status === 'suspended') {
+                  await signOut(auth);
+                  updateUserWithCache(null);
+                  return;
+                }
+                const updatedUser: User = {
+                  ...liveData,
+                  id: snap.id,
+                  authProvider: currentAuthProvider
+                };
+                if (!isUserSuperAdmin(updatedUser)) {
+                  const currentUrlSlug = getUrlTargetRestaurantSlug();
+                  if (currentUrlSlug && !doesUserBelongToRestaurant(updatedUser, currentUrlSlug)) {
+                    await signOut(auth);
+                    updateUserWithCache(null);
+                    return;
+                  }
+                }
+                updateUserWithCache(updatedUser);
               }
             }, (err) => {
               console.warn('Staff profile listener warning:', err);
@@ -512,32 +582,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   authProvider: currentAuthProvider
                 };
 
+                // Enforce tenant session isolation against current URL
+                const targetSlug = getUrlTargetRestaurantSlug();
+                if (targetSlug && !doesUserBelongToRestaurant(ownerUser, targetSlug, { id: restDoc.id, slug: restData.slug || restDoc.id })) {
+                  console.warn(`[useAuth] Owner user ${ownerUser.email} belongs to ${ownerUser.restaurantId} but is visiting ${targetSlug}. Rejecting cross-tenant session.`);
+                  await signOut(auth);
+                  updateUserWithCache(null);
+                  setLoading(false);
+                  return;
+                }
+
                 try {
                   await setDoc(doc(db, 'users', firebaseUser.uid), {
                     ...ownerUser,
                     createdAt: serverTimestamp(),
                   }, { merge: true });
                 } catch (e) {}
-
-                // Enforce tenant session isolation against current URL
-                if (typeof window !== 'undefined') {
-                  const match = window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
-                  if (match && match[1]) {
-                    const rawSlug = match[1].toLowerCase();
-                    const targetSlug = rawSlug === 'bella-italia' ? 'bela-italia' : rawSlug;
-                    const userRest = (ownerUser.restaurantId || (ownerUser.restaurantIds && ownerUser.restaurantIds[0]) || '').toLowerCase();
-                    const normalizedUserRest = userRest === 'bella-italia' ? 'bela-italia' : userRest;
-                    const userRestIds = (ownerUser.restaurantIds || []).map(id => id.toLowerCase() === 'bella-italia' ? 'bela-italia' : id.toLowerCase());
-                    
-                    if (userRest && normalizedUserRest !== targetSlug && !userRestIds.includes(targetSlug)) {
-                      console.warn(`[useAuth] Owner user ${ownerUser.email} belongs to ${userRest} but is visiting ${targetSlug}. Rejecting cross-tenant session.`);
-                      await signOut(auth);
-                      updateUserWithCache(null);
-                      setLoading(false);
-                      return;
-                    }
-                  }
-                }
 
                 updateUserWithCache(ownerUser);
                 localStorage.removeItem('intendedRole');
@@ -549,15 +609,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // 3. If NOT found in `users` and user intended to log in specifically as Staff
-          if (intendedRole === 'staff') {
+          // 3. If NOT found in `users` and user intended to log in specifically as Staff/Admin
+          if (intendedRole === 'staff' || intendedRole === 'admin') {
             await signOut(auth);
             updateUserWithCache(null);
             localStorage.removeItem('intendedRole');
             toast.error(
               language === 'pt'
-                ? 'Conta de funcionário não encontrada para este email Google. Solicite ao administrador para adicionar o seu email.'
-                : 'Staff account not found for this Google email. Please ask an administrator to add your email.'
+                ? 'Conta de funcionário não encontrada para este email. Solicite ao administrador para adicionar o seu email.'
+                : 'Staff account not found for this email. Please ask an administrator to add your email.'
             );
             setLoading(false);
             return;
@@ -700,7 +760,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = async (email: string, pass: string, name: string) => {
     try {
-      // Use customer role by default for email signup
       localStorage.setItem('intendedRole', 'customer');
       localStorage.setItem('justSignedUp', 'true');
       let result;
@@ -708,8 +767,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         result = await createUserWithEmailAndPassword(auth, email, pass);
       } catch (initialErr: any) {
         if (initialErr.code === 'auth/email-already-in-use') {
-          // It's possible the user was deleted from the db but orphaned in Auth.
-          // Let's attempt to cleanup the orphan and retry.
           try {
             const res = await fetch('/api/admin/delete-user-by-email', {
               method: 'POST',
@@ -717,13 +774,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               body: JSON.stringify({ email })
             });
             if (res.ok) {
-              // Retry creation
               result = await createUserWithEmailAndPassword(auth, email, pass);
             } else {
-              throw initialErr; // API failed, throw original error
+              throw initialErr;
             }
           } catch (cleanupErr) {
-            throw initialErr; // Network/fetch failed, throw original error
+            throw initialErr;
           }
         } else {
           throw initialErr;
@@ -731,10 +787,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       const uid = result.user.uid;
-      
-      // Send verification email
       await sendEmailVerification(result.user);
-      
       await syncExistingCustomerDetails(uid, email, name);
     } catch (error: any) {
       console.error('Sign up error:', error);
@@ -803,10 +856,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const isSuperAdmin = !user?.restaurantId && (user?.role === 'super_admin' || (user?.email?.trim().toLowerCase() === 'pcristo35@gmail.com'));
-  const isAdmin = isSuperAdmin || user?.role === 'admin' || user?.role === 'restaurant_owner' || user?.role === 'restaurant_manager';
-  const isStaff = user?.role === 'staff' || user?.role === 'restaurant_staff' || isAdmin;
-  const isCustomer = user?.role === 'customer' && !isAdmin;
+  const isSuperAdmin = isUserSuperAdmin(user);
+  const isAdmin = isSuperAdmin || (
+    Boolean(user?.restaurantId || (user?.restaurantIds && user.restaurantIds.length > 0)) &&
+    (user?.role === 'admin' || user?.role === 'restaurant_owner' || user?.role === 'restaurant_manager')
+  );
+  const isStaff = isSuperAdmin || (
+    Boolean(user?.restaurantId || (user?.restaurantIds && user.restaurantIds.length > 0)) &&
+    (user?.role === 'staff' || user?.role === 'restaurant_staff' || isAdmin)
+  );
+  const isCustomer = user?.role === 'customer' && !isAdmin && !isStaff;
 
   return (
     <AuthContext.Provider value={{ 

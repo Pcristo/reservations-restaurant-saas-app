@@ -23,10 +23,13 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useFeatureFlags } from '../../services/featureFlagsService';
 
 export const RestaurantDomainSettings: React.FC = () => {
   const { tenant, domains, refreshTenant, entitlements } = useTenant();
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const customDomainsEnabled = isFeatureEnabled('custom_domains');
 
   const [isAdding, setIsAdding] = useState(false);
   const [newDomain, setNewDomain] = useState('');
@@ -43,6 +46,10 @@ export const RestaurantDomainSettings: React.FC = () => {
 
   const handleAddDomain = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!customDomainsEnabled) {
+      toast.error('Custom Domain Ingress is currently disabled by Platform Feature Flags.');
+      return;
+    }
     if (!tenant) return;
     if (!newDomain.trim()) {
       toast.error('Please enter a domain name.');
@@ -159,7 +166,7 @@ export const RestaurantDomainSettings: React.FC = () => {
             </p>
           </div>
 
-          {!isAdding && (
+          {!isAdding && customDomainsEnabled && (
             <button
               onClick={() => setIsAdding(true)}
               className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
@@ -169,6 +176,18 @@ export const RestaurantDomainSettings: React.FC = () => {
             </button>
           )}
         </div>
+
+        {!customDomainsEnabled && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-bold text-amber-900">Custom Domain Ingress Disabled Globally</h4>
+              <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                Custom domain routing and automatic SSL provisioning are currently disabled by Platform Feature Flags. Your platform URL (<span className="font-mono font-semibold">{eataSubdomainUrl}</span>) remains active.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Add Domain Form */}
         {isAdding && (

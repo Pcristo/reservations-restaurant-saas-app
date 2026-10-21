@@ -346,13 +346,7 @@ export const SuperAdminRestaurants: React.FC = () => {
   };
 
   const handleImpersonate = async (r: Restaurant) => {
-    try {
-      await impersonateRestaurant(r.id);
-      toast.success(`Now managing ${r.name} as Super Admin`);
-      navigate(`/r/${r.slug}/admin`);
-    } catch (err) {
-      toast.error('Failed to impersonate tenant.');
-    }
+    toast.error('Support access session mode has been removed.');
   };
 
   const handleToggleStatus = async (r: Restaurant) => {
@@ -567,6 +561,15 @@ export const SuperAdminRestaurants: React.FC = () => {
                           Maintenance
                         </span>
                       )}
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          r.supportAccessAllowed || r.settings?.supportAccessAllowed
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        Support: {r.supportAccessAllowed || r.settings?.supportAccessAllowed ? 'ON' : 'OFF'}
+                      </span>
                     </div>
                   </td>
 
@@ -593,15 +596,6 @@ export const SuperAdminRestaurants: React.FC = () => {
 
                   <td className="py-3.5 px-4 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      {/* Impersonate Button */}
-                      <button
-                        title="Impersonate & Manage Restaurant"
-                        onClick={() => handleImpersonate(r)}
-                        className="px-2.5 py-1 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                      >
-                        <ShieldAlert size={12} />
-                        <span>Impersonate</span>
-                      </button>
 
                       {/* Manage Admin Credentials & Password */}
                       <button

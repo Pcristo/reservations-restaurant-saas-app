@@ -169,6 +169,32 @@ export async function getPlatformSettings(env: Record<string, any> = {}): Promis
   return {};
 }
 
+export async function getPlatformFeatureFlags(env: Record<string, any> = {}): Promise<Array<{ id: string; enabled: boolean }>> {
+  const apiKey = env.VITE_FIREBASE_API_KEY || env.FIREBASE_API_KEY || firebaseConfig.apiKey;
+  const projectId = env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+  const databaseId = env.VITE_FIREBASE_DATABASE_ID || env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+  const dbIds = [databaseId, '(default)'];
+  for (const dbId of dbIds) {
+    try {
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${dbId}/documents/platform_settings/feature_flags?key=${apiKey}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const doc = await res.json();
+        if (doc.fields) {
+          const parsed = parseFirestoreFields(doc.fields);
+          if (Array.isArray(parsed.flags)) {
+            return parsed.flags;
+          }
+        }
+      }
+    } catch (e) {
+      // try next
+    }
+  }
+  return [];
+}
+
 export async function getMarketingWebsiteSettingsRest(env: Record<string, any> = {}): Promise<Record<string, any>> {
   const apiKey = env.VITE_FIREBASE_API_KEY || env.FIREBASE_API_KEY || firebaseConfig.apiKey;
   const projectId = env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
@@ -510,4 +536,128 @@ export async function deleteMatchingDocsRest(
     return { success: false, count: 0, error: err?.message };
   }
 }
+
+export async function getFirestoreDocRest(
+  collectionName: string,
+  docId: string,
+  env: Record<string, any> = {},
+  idToken?: string
+): Promise<Record<string, any> | null> {
+  if (!docId) return null;
+  const apiKey = env.VITE_FIREBASE_API_KEY || env.FIREBASE_API_KEY || firebaseConfig.apiKey;
+  const projectId = env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+  const databaseId = env.VITE_FIREBASE_DATABASE_ID || env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}?key=${apiKey}`;
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+    const doc = await res.json().catch(() => null);
+    if (!doc || !doc.fields) return null;
+    return parseFirestoreFields(doc.fields);
+  } catch {
+    return null;
+  }
+}
+
+export async function queryFirestoreDocsRest(
+  collectionName: string,
+  fieldName: string,
+  fieldValue: string,
+  env: Record<string, any> = {},
+  idToken?: string
+): Promise<Array<Record<string, any>>> {
+  const apiKey = env.VITE_FIREBASE_API_KEY || env.FIREBASE_API_KEY || firebaseConfig.apiKey;
+  const projectId = env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+  const databaseId = env.VITE_FIREBASE_DATABASE_ID || env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+  const queryUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents:runQuery?key=${apiKey}`;
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    const queryRes = await fetch(queryUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: collectionName }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: fieldName },
+              op: 'EQUAL',
+              value: { stringValue: fieldValue }
+            }
+          }
+        }
+      })
+    });
+    if (!queryRes.ok) return [];
+    const results = await queryRes.json().catch(() => []);
+    if (!Array.isArray(results)) return [];
+    const docs: Array<Record<string, any>> = [];
+    for (const item of results) {
+      if (item.document?.fields) {
+        const parsed = parseFirestoreFields(item.document.fields);
+        const nameParts = String(item.document.name || '').split('/');
+        const docId = nameParts[nameParts.length - 1];
+        docs.push({ id: docId, ...parsed });
+      }
+    }
+    return docs;
+  } catch {
+    return [];
+  }
+}
+
+export interface FirebaseEnv {
+  VITE_FIREBASE_API_KEY?: string;
+  FIREBASE_API_KEY?: string;
+  VITE_FIREBASE_PROJECT_ID?: string;
+  FIREBASE_PROJECT_ID?: string;
+  VITE_FIREBASE_DATABASE_ID?: string;
+  FIREBASE_DATABASE_ID?: string;
+}
+
+export async function verifyIdToken(idToken: string, env: Record<string, any> = {}): Promise<{ localId: string; email?: string }> {
+  const res = await verifyAuthToken(idToken, env);
+  if (!res.success || !res.uid) {
+    throw new Error(res.error || 'Unauthorized');
+  }
+  return { localId: res.uid, email: res.email };
+}
+
+export async function firestoreGet(env: Record<string, any>, collectionName: string, docId: string): Promise<Record<string, any> | null> {
+  return getFirestoreDocRest(collectionName, docId, env);
+}
+
+export async function firestoreSet(env: Record<string, any>, collectionName: string, docId: string, data: Record<string, any>): Promise<void> {
+  const res = await saveFirestoreDocRest(collectionName, docId, data, env);
+  if (!res.success) throw new Error(res.error || 'Failed to save document');
+}
+
+export async function firestorePatch(env: Record<string, any>, collectionName: string, docId: string, data: Record<string, any>): Promise<void> {
+  const existing = (await getFirestoreDocRest(collectionName, docId, env)) || {};
+  const merged = { ...existing, ...data };
+  const res = await saveFirestoreDocRest(collectionName, docId, merged, env);
+  if (!res.success) throw new Error(res.error || 'Failed to patch document');
+}
+
+export async function firestoreDelete(env: Record<string, any>, collectionName: string, docId: string): Promise<void> {
+  const res = await deleteFirestoreDocRest(collectionName, docId, env);
+  if (!res.success) throw new Error(res.error || 'Failed to delete document');
+}
+
+export async function firestoreQuery(env: Record<string, any>, collectionName: string, wheres: Array<{ field: string; op: string; value: any }>): Promise<Array<Record<string, any>>> {
+  if (wheres.length === 0) return [];
+  const w = wheres[0];
+  return queryFirestoreDocsRest(collectionName, w.field, w.value, env);
+}
+
+
 

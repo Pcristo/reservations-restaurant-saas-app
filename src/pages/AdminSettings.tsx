@@ -1,11 +1,11 @@
 import { FaFacebook, FaInstagram } from 'react-icons/fa';
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { format, parseISO, addDays } from 'date-fns';
-import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard } from 'lucide-react';
+import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard, CheckCircle2, LifeBuoy } from 'lucide-react';
 import { useReservations } from '../hooks/useReservations';
 import { useCustomers } from '../hooks/useCustomers';
 import { DAYS_OF_WEEK } from '../constants';
@@ -27,13 +27,24 @@ import { uploadRestaurantImageToCloudinary } from '../services/cloudinaryService
 import { isUserSuperAdmin } from '../lib/permissions';
 import { useTenant } from '../hooks/useTenant';
 import { APP_CONFIG } from '../data/appConfig';
+import { useFeatureFlags } from '../services/featureFlagsService';
+import restaurantFloorPlan from '../assets/restaurant_floor-plan.jpg';
+import { isPackageFeatureEnabled } from '../services/entitlementsService';
 
 dayjs.extend(customParseFormat);
 
 export default function AdminSettings() {
   const { slug } = useParams<{ slug?: string }>();
-  const { tenant } = useTenant();
+  const { tenant, entitlements, plan } = useTenant();
   const { isAdmin, user } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const isCustomDomainEntitled = isPackageFeatureEnabled(entitlements, 'customDomain');
+  const isSmsEntitled = isPackageFeatureEnabled(entitlements, 'sms');
+  const isSeoEntitled = isPackageFeatureEnabled(entitlements, 'advancedSEO');
+  const customDomainsEnabled = isFeatureEnabled('custom_domains');
+  const smsNotificationsEnabled = isFeatureEnabled('sms_notifications');
+  const multiLanguageEnabled = isFeatureEnabled('multi_language');
+  const advancedSeoEnabled = isFeatureEnabled('advanced_seo');
   const currentSlug = slug || tenant?.slug || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]);
   const { settings, updateSettings, loading } = useSettings(currentSlug || slug || tenant?.id);
   const adminBase = currentSlug ? `/r/${currentSlug}/admin` : '/admin';
@@ -344,7 +355,24 @@ export default function AdminSettings() {
         customSettings: formData,
       });
 
-      if (field === 'socialImageUrl') {
+      if (field === 'floorPlanBgUrl') {
+        const updated = {
+          ...formData,
+          floorPlanBgUrl: res.secure_url,
+          cloudinaryFloorPlanBgUrl: res.secure_url,
+          useDefaultFloorPlanBg: false,
+          showFloorPlanBg: true,
+        };
+        setFormData(updated);
+        try {
+          await updateSettings(updated);
+        } catch (saveErr) {
+          console.warn('[AdminSettings] Auto-saving floorPlanBgUrl note:', saveErr);
+        }
+        toast.success(language === 'pt' 
+          ? 'Planta de sala carregada para o Cloudinary e sincronizada com a Vista ao Vivo!' 
+          : 'Floor plan image uploaded to Cloudinary and synchronized with Live View!');
+      } else if (field === 'socialImageUrl') {
         setFormData(prev => ({
           ...prev,
           seo: {
@@ -362,7 +390,6 @@ export default function AdminSettings() {
           'faviconUrl': 'cloudinaryFaviconUrl',
           'heroImageUrl': 'cloudinaryHeroImageUrl',
           'footerImageUrl': 'cloudinaryFooterImageUrl',
-          'floorPlanBgUrl': 'floorPlanBgUrl',
         };
         const targetCloudinaryField = cloudinaryFieldMap[field];
 
@@ -386,7 +413,24 @@ export default function AdminSettings() {
         reader.onload = (uploadEvent) => {
           const dataUrl = uploadEvent.target?.result as string;
           if (dataUrl) {
-            if (field === 'socialImageUrl') {
+            if (field === 'floorPlanBgUrl') {
+              const updated = {
+                ...formData,
+                floorPlanBgUrl: dataUrl,
+                cloudinaryFloorPlanBgUrl: dataUrl,
+                useDefaultFloorPlanBg: false,
+                showFloorPlanBg: true,
+              };
+              setFormData(updated);
+              try {
+                updateSettings(updated);
+              } catch (e) {}
+              toast.success(
+                language === 'pt'
+                  ? 'Planta de sala aplicada e sincronizada com a Vista ao Vivo!'
+                  : 'Floor plan image applied and synchronized with Live View!'
+              );
+            } else if (field === 'socialImageUrl') {
               setFormData(prev => ({
                 ...prev,
                 seo: {
@@ -395,13 +439,15 @@ export default function AdminSettings() {
                   cloudinarySocialImageUrl: dataUrl
                 }
               }));
+              toast.success(language === 'pt' 
+                ? 'Imagem de partilha social aplicada com sucesso!' 
+                : 'Social share image applied successfully!');
             } else {
               const cloudinaryFieldMap: Record<string, string> = {
                 'logoUrl': 'cloudinaryLogoUrl',
                 'faviconUrl': 'cloudinaryFaviconUrl',
                 'heroImageUrl': 'cloudinaryHeroImageUrl',
                 'footerImageUrl': 'cloudinaryFooterImageUrl',
-                'floorPlanBgUrl': 'floorPlanBgUrl',
               };
               const targetField = cloudinaryFieldMap[field];
               setFormData(prev => ({
@@ -409,12 +455,12 @@ export default function AdminSettings() {
                 [field]: dataUrl,
                 ...(targetField ? { [targetField]: dataUrl } : {})
               } as any));
+              toast.success(
+                language === 'pt'
+                  ? 'Imagem carregada e aplicada com sucesso!'
+                  : 'Image uploaded and applied successfully!'
+              );
             }
-            toast.success(
-              language === 'pt'
-                ? 'Imagem carregada e aplicada com sucesso!'
-                : 'Image uploaded and applied successfully!'
-            );
           }
         };
         reader.readAsDataURL(file);
@@ -609,18 +655,25 @@ export default function AdminSettings() {
             <span>Branding & Appearance</span>
           </button>
 
-          <button
-            onClick={() => { setActiveTab('domains'); setShowBin(false); setShowDataHistory(false); }}
-            className={cn(
-              "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer",
-              activeTab === 'domains' && !showBin && !showDataHistory
-                ? "bg-amber-500 text-white shadow-sm"
-                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-            )}
-          >
-            <Globe size={14} />
-            <span>Custom Domains</span>
-          </button>
+          {customDomainsEnabled && (
+            <button
+              onClick={() => { setActiveTab('domains'); setShowBin(false); setShowDataHistory(false); }}
+              className={cn(
+                "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer",
+                activeTab === 'domains' && !showBin && !showDataHistory
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              )}
+            >
+              {isCustomDomainEntitled ? <Globe size={14} /> : <Lock size={14} className="text-amber-500" />}
+              <span>Custom Domains</span>
+              {!isCustomDomainEntitled && (
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 ml-1">
+                  Upgrade
+                </span>
+              )}
+            </button>
+          )}
 
           <button
             onClick={() => { setActiveTab('media'); setShowBin(false); setShowDataHistory(false); }}
@@ -726,7 +779,30 @@ export default function AdminSettings() {
       )}
 
       {activeTab === 'domains' && !showBin && !showDataHistory && (
-        <RestaurantDomainSettings />
+        !isCustomDomainEntitled ? (
+          <div className="p-8 rounded-2xl border border-amber-500/30 bg-white dark:bg-gray-900 text-center max-w-xl mx-auto space-y-4 my-8 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto">
+              <Lock size={24} />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+              {language === 'pt' ? 'Domínio Personalizado Não Incluído' : 'Custom Subdomain/Domain Not Included'}
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              {language === 'pt'
+                ? `O seu pacote de subscrição atual (${plan?.name || 'Starter'}) não inclui domínios próprios ou subdomínios de marca com certificado SSL automático. Atualize o seu plano para desbloquear este recurso.`
+                : `Your current subscription package (${plan?.name || 'Starter'}) does not include custom domains or branded subdomains with automated SSL. Upgrade your package to unlock this feature.`}
+            </p>
+            <Link
+              to={`${adminBase}/billing`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-colors"
+            >
+              <CreditCard size={14} />
+              <span>{language === 'pt' ? 'Gerir Plano / Fazer Upgrade' : 'Manage Subscription / Upgrade'}</span>
+            </Link>
+          </div>
+        ) : (
+          <RestaurantDomainSettings />
+        )
       )}
 
       {activeTab === 'media' && !showBin && !showDataHistory && (
@@ -1120,33 +1196,65 @@ export default function AdminSettings() {
               </div>
 
               {/* SMS Phone Verification with Twilio */}
-              <div className={cn(
-                "p-4 rounded-xl border mt-3 flex items-center justify-between gap-4 transition-all duration-300",
-                settings?.theme === 'dark' ? "bg-amber-900/20 border-amber-900/50" : "bg-amber-50 border-amber-100"
-              )}>
-                <div>
-                  <h3 className={cn(
-                    "text-sm font-bold transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-amber-400" : "text-amber-900"
-                  )}>{t('settings.phone_verification')}</h3>
-                  <p className={cn(
-                    "text-[10px] transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-amber-500/80" : "text-amber-700"
-                  )}>{t('settings.phone_verification_desc')}</p>
-                </div>
-                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={formData.phoneVerificationEnabled ?? false} 
-                    onChange={(e) => setFormData({ ...formData, phoneVerificationEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
+              {smsNotificationsEnabled && (
+                !isSmsEntitled ? (
                   <div className={cn(
-                    "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600",
-                    settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-amber-900" : "bg-gray-200 peer-focus:ring-amber-300"
-                  )}></div>
-                </label>
-              </div>
+                    "p-4 rounded-xl border mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all duration-300",
+                    settings?.theme === 'dark' ? "bg-amber-950/20 border-amber-900/50" : "bg-amber-50/60 border-amber-200"
+                  )}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Lock size={15} className="text-amber-600" />
+                        <h3 className="text-xs font-bold text-gray-900 dark:text-white">
+                          {t('settings.phone_verification')}
+                        </h3>
+                        <span className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600">
+                          Upgrade
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        {language === 'pt'
+                          ? `Lembretes e Verificação SMS não estão incluídos no plano ${plan?.name || 'Starter'}. Atualize o pacote para ativar.`
+                          : `SMS Reminders and Verification are not included in the ${plan?.name || 'Starter'} package. Upgrade your package to enable.`}
+                      </p>
+                    </div>
+                    <Link
+                      to={`${adminBase}/billing`}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-600 hover:bg-amber-700 text-white whitespace-nowrap self-start sm:self-auto shadow-2xs"
+                    >
+                      {language === 'pt' ? 'Mudar Plano' : 'Upgrade Plan'}
+                    </Link>
+                  </div>
+                ) : (
+                  <div className={cn(
+                    "p-4 rounded-xl border mt-3 flex items-center justify-between gap-4 transition-all duration-300",
+                    settings?.theme === 'dark' ? "bg-amber-900/20 border-amber-900/50" : "bg-amber-50 border-amber-100"
+                  )}>
+                    <div>
+                      <h3 className={cn(
+                        "text-sm font-bold transition-colors duration-300",
+                        settings?.theme === 'dark' ? "text-amber-400" : "text-amber-900"
+                      )}>{t('settings.phone_verification')}</h3>
+                      <p className={cn(
+                        "text-[10px] transition-colors duration-300",
+                        settings?.theme === 'dark' ? "text-amber-500/80" : "text-amber-700"
+                      )}>{t('settings.phone_verification_desc')}</p>
+                    </div>
+                     <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={formData.phoneVerificationEnabled ?? false} 
+                        onChange={(e) => setFormData({ ...formData, phoneVerificationEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className={cn(
+                        "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600",
+                        settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-amber-900" : "bg-gray-200 peer-focus:ring-amber-300"
+                      )}></div>
+                    </label>
+                  </div>
+                )
+              )}
 
               {/* Default Phone Country Code */}
               <div className={cn(
@@ -1775,33 +1883,35 @@ export default function AdminSettings() {
                 </label>
               </div>
 
-              <div className={cn(
-                "flex items-center justify-between p-4 rounded-xl border mt-3 transition-colors duration-300",
-                settings?.theme === 'dark' ? "bg-green-900/10 border-green-900/50" : "bg-green-50 border-green-100"
-              )}>
-                <div>
-                  <h3 className={cn(
-                    "text-sm font-bold transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-green-400" : "text-green-900"
-                  )}>{t('settings.show_lang_switch')}</h3>
-                  <p className={cn(
-                    "text-[10px] transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-green-500/80" : "text-green-700"
-                  )}>{t('settings.show_lang_switch_desc')}</p>
+              {multiLanguageEnabled && (
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border mt-3 transition-colors duration-300",
+                  settings?.theme === 'dark' ? "bg-green-900/10 border-green-900/50" : "bg-green-50 border-green-100"
+                )}>
+                  <div>
+                    <h3 className={cn(
+                      "text-sm font-bold transition-colors duration-300",
+                      settings?.theme === 'dark' ? "text-green-400" : "text-green-900"
+                    )}>{t('settings.show_lang_switch')}</h3>
+                    <p className={cn(
+                      "text-[10px] transition-colors duration-300",
+                      settings?.theme === 'dark' ? "text-green-500/80" : "text-green-700"
+                    )}>{t('settings.show_lang_switch_desc')}</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={formData.showLanguageSwitch ?? true} 
+                      onChange={(e) => setFormData({ ...formData, showLanguageSwitch: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className={cn(
+                      "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600",
+                      settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-green-900" : "bg-gray-200 peer-focus:ring-green-300"
+                    )}></div>
+                  </label>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={formData.showLanguageSwitch ?? true} 
-                    onChange={(e) => setFormData({ ...formData, showLanguageSwitch: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className={cn(
-                    "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600",
-                    settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-green-900" : "bg-gray-200 peer-focus:ring-green-300"
-                  )}></div>
-                </label>
-              </div>
+              )}
 
               <div className={cn(
                 "flex items-center justify-between p-4 rounded-xl border mt-3 transition-colors duration-300",
@@ -2933,6 +3043,9 @@ export default function AdminSettings() {
 
                   </div>
                 )}
+              </div>
+            </div>
+
               {/* Floor Plan Layout Section */}
               <div className={cn(
                 "p-4 rounded-xl border mt-3 space-y-4 transition-colors duration-300",
@@ -2971,7 +3084,7 @@ export default function AdminSettings() {
                 )}>{t('settings.floor_plan_show_desc')}</p>
 
                 <AnimatePresence>
-                {(formData.showFloorPlanBg !== false && isFloorPlanAccordionOpen) && (
+                {formData.showFloorPlanBg !== false && isFloorPlanAccordionOpen && (
                   <motion.div 
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: 'auto', opacity: 1 }}
@@ -2979,6 +3092,7 @@ export default function AdminSettings() {
                     transition={{ duration: 0.3, ease: 'easeInOut' }}
                     className="overflow-hidden"
                   >
+                    <div className="flex flex-col gap-4">
                     <div className="space-y-4 pt-3 border-t border-amber-200/50 dark:border-amber-900/30 mt-3">
                     {/* Background Type Option (Default vs Custom) */}
                     <div className="space-y-2">
@@ -3042,18 +3156,21 @@ export default function AdminSettings() {
                         <input 
                           type="text"
                           value={formData.floorPlanBgUrl || ''}
-                          onChange={(e) => setFormData({ ...formData, floorPlanBgUrl: e.target.value })}
-                          placeholder="e.g. https://example.com/layout.png"
-                          disabled={formData.useDefaultFloorPlanBg === true}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            floorPlanBgUrl: e.target.value,
+                            useDefaultFloorPlanBg: false,
+                            showFloorPlanBg: true,
+                          })}
+                          placeholder="e.g. https://res.cloudinary.com/... or https://example.com/layout.png"
                           className={cn(
                             "w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-xs font-mono transition-colors",
-                            formData.useDefaultFloorPlanBg === true ? "opacity-50 cursor-not-allowed" : "",
                             settings?.theme === 'dark' ? "bg-gray-900 border-amber-900/50 text-amber-100 placeholder-amber-800" : "bg-white border-amber-200 text-amber-900 placeholder-amber-200"
                           )}
                         />
                         <label className={cn(
                           "w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-all shrink-0 font-medium text-xs shadow-sm",
-                          (formData.useDefaultFloorPlanBg === true || uploadingField === 'floorPlanBgUrl')
+                          uploadingField === 'floorPlanBgUrl'
                             ? "opacity-50 cursor-not-allowed pointer-events-none"
                             : settings?.theme === 'dark'
                               ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30"
@@ -3063,7 +3180,7 @@ export default function AdminSettings() {
                             type="file" 
                             accept="image/*" 
                             className="hidden"
-                            disabled={uploadingField === 'floorPlanBgUrl' || formData.useDefaultFloorPlanBg === true}
+                            disabled={uploadingField === 'floorPlanBgUrl'}
                             onChange={(e) => handleFileUpload(e, 'floorPlanBgUrl')}
                           />
                           <Cloud size={14} className={uploadingField === 'floorPlanBgUrl' ? "animate-pulse" : "text-amber-500"} />
@@ -3077,7 +3194,86 @@ export default function AdminSettings() {
                         "text-[10px] italic transition-colors",
                         settings?.theme === 'dark' ? "text-amber-500/80" : "text-amber-600"
                       )}>{t('settings.floor_plan_url_desc')}</p>
-                    </div>
+
+                      {/* Floor Plan Image Live Preview Card */}
+                      {Boolean(formData.showFloorPlanBg) && (
+                        <div className="mt-3 p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-950/20 flex flex-col sm:flex-row items-center gap-4 transition-all overflow-hidden relative">
+                          {/* Section Background Subtle Overlay */}
+                          <div 
+                            className="absolute inset-0 opacity-[0.15] pointer-events-none z-0"
+                            style={{ 
+                              backgroundImage: `url(${formData.useDefaultFloorPlanBg ? restaurantFloorPlan : (formData.floorPlanBgUrl || (formData as any).cloudinaryFloorPlanBgUrl || restaurantFloorPlan)})`,
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center'
+                            }}
+                          />
+                          
+                          <div className="relative w-36 h-24 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 shrink-0 bg-white dark:bg-gray-800 shadow-xs z-10">
+                            <img 
+                              src={formData.useDefaultFloorPlanBg ? restaurantFloorPlan : (formData.floorPlanBgUrl || (formData as any).cloudinaryFloorPlanBgUrl || restaurantFloorPlan)} 
+                              alt="Floor Plan Preview" 
+                              className="w-full h-full object-fill"
+                              referrerPolicy="no-referrer"
+                              style={{ opacity: formData.floorPlanOpacity ?? 1.0 }}
+                            />
+                          </div>
+                          <div className="flex-1 space-y-1.5 text-center sm:text-left min-w-0 w-full z-10">
+                            <div className="flex items-center gap-2 justify-center sm:justify-start">
+                              <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <CheckCircle2 size={14} className="text-emerald-500" />
+                                {formData.useDefaultFloorPlanBg 
+                                  ? (language === 'pt' ? 'Planta Padrão Ativa' : 'Default Floor Plan Active')
+                                  : (language === 'pt' ? 'Planta Personalizada Ativa' : 'Custom Floor Plan Active')}
+                              </span>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                {formData.useDefaultFloorPlanBg ? 'Default' : 'Cloudinary'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate font-mono">
+                              {formData.useDefaultFloorPlanBg ? 'assets/restaurant_floor-plan.jpg' : (formData.floorPlanBgUrl || 'No URL set')}
+                            </p>
+                            <div className="flex items-center gap-3 pt-1 justify-center sm:justify-start">
+                              <Link
+                                to={`${adminBase}/live`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:underline flex items-center gap-1.5"
+                              >
+                                <ExternalLink size={13} />
+                                <span>{language === 'pt' ? 'Ver Planta na Vista ao Vivo' : 'View Floor Plan in Live View'}</span>
+                              </Link>
+                              {!formData.useDefaultFloorPlanBg && (
+                                <>
+                                  <span className="text-gray-300 dark:text-gray-600">•</span>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const updated = {
+                                        ...formData,
+                                        floorPlanBgUrl: '',
+                                        cloudinaryFloorPlanBgUrl: '',
+                                        useDefaultFloorPlanBg: true,
+                                      };
+                                      setFormData(updated);
+                                      try {
+                                        await updateSettings(updated);
+                                      } catch (e) {}
+                                      toast.success(
+                                        language === 'pt' 
+                                          ? 'Fundo removido. A usar layout de sala padrão.' 
+                                          : 'Custom floor plan removed. Restored default room layout.'
+                                      );
+                                    }}
+                                    className="text-xs text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-medium cursor-pointer"
+                                  >
+                                    {language === 'pt' ? 'Remover' : 'Remove'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -3099,11 +3295,13 @@ export default function AdminSettings() {
                         className="w-full h-2 bg-amber-200 rounded-lg appearance-none cursor-pointer dark:bg-amber-950 accent-amber-600"
                       />
                     </div>
-                  </div>
+                    </div>
+                    </div>
+                    </div>
                   </motion.div>
                 )}
-                </AnimatePresence>
-              </div>
+              </AnimatePresence>
+            </div>
 
                 {/* Data History Password */}
                 <div className={cn(
@@ -3156,7 +3354,6 @@ export default function AdminSettings() {
                 </div>
               </div>
             </div>
-              </div>
 
               {/* App Unlock PIN */}
               <div className={cn(
@@ -3214,7 +3411,6 @@ export default function AdminSettings() {
                 </div>
               </div>
             </div>
-          </div>
         </div>
 
         {/* Social Links */}
@@ -3488,13 +3684,49 @@ export default function AdminSettings() {
             </div>
           </div>
         {/* Restaurant SEO Settings Section */}
-        <RestaurantSEOSettings
-          formData={formData}
-          setFormData={setFormData}
-          uploadingField={uploadingField}
-          handleFileUpload={handleFileUpload}
-          theme={settings?.theme}
-        />
+        {advancedSeoEnabled && (
+          !isSeoEntitled ? (
+            <div className={cn(
+              "p-6 rounded-2xl border space-y-3 lg:col-span-3 transition-colors duration-300 shadow-xs",
+              settings?.theme === 'dark' ? "bg-gray-900 border-gray-800" : "bg-white border-amber-200"
+            )}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      <Lock size={18} />
+                    </div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                      {language === 'pt' ? 'SEO Avançado & Schema.org Rich Snippets' : 'Advanced SEO & Schema.org Rich Snippets'}
+                    </h3>
+                    <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600">
+                      Upgrade Required
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl leading-relaxed">
+                    {language === 'pt'
+                      ? `A configuração de meta títulos, cartões de partilha social OpenGraph e dados estruturados Schema.org para reservas online não está incluída no seu plano atual (${plan?.name || 'Starter'}). Faça upgrade do seu pacote para ativar o SEO Avançado.`
+                      : `Custom meta titles, OpenGraph social preview cards, and Schema.org rich restaurant structured data are not included in your current package (${plan?.name || 'Starter'}). Upgrade your package to configure Advanced SEO.`}
+                  </p>
+                </div>
+                <Link
+                  to={`${adminBase}/billing`}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs whitespace-nowrap self-start sm:self-auto"
+                >
+                  {language === 'pt' ? 'Ver Planos & Upgrade' : 'View Packages & Upgrade'}
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <RestaurantSEOSettings
+              formData={formData}
+              setFormData={setFormData}
+              uploadingField={uploadingField}
+              handleFileUpload={handleFileUpload}
+              theme={settings?.theme}
+            />
+          )
+        )}
 
         {/* Promotion Popups */}
         <div className={cn(

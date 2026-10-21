@@ -23,8 +23,10 @@ import {
   User 
 } from '../types';
 import { DEFAULT_PLANS } from '../data/plans';
+import { isFeatureEnabled } from './featureFlagsService';
 import { APP_CONFIG } from '../data/appConfig';
 import { DEFAULT_SETTINGS } from '../constants';
+import { isUserSuperAdmin } from '../lib/permissions';
 
 export interface CreateRestaurantInput extends Partial<Restaurant> {
   ownerPassword?: string;
@@ -170,6 +172,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
         cuisine: 'Autêntica Cozinha Italiana & Pizze em Forno a Lenha',
         description: 'Tradição italiana autêntica no coração de Lisboa. Ingredientes frescos, massas caseiras e pizzas artesanais.',
         descriptionPt: 'Tradição italiana autêntica no coração de Lisboa. Ingredientes frescos, massas caseiras e pizzas artesanais.',
+        website: 'https://belaitalia.pt',
         branding: {
           primaryColor: '#059669',
           secondaryColor: '#1e293b',
@@ -299,6 +302,26 @@ export async function createRestaurant(
   const ownerName = (data.ownerName || adminUser?.name || 'Owner').trim();
   let ownerUid = data.ownerUid || data.ownerId || '';
 
+  // Prevent cross-restaurant account sharing: check if ownerEmail already belongs to another restaurant's staff/admin
+  if (ownerEmail && !isUserSuperAdmin({ email: ownerEmail } as User)) {
+    try {
+      const qExistingUsers = query(collection(db, 'users'), where('email', '==', ownerEmail));
+      const snapExistingUsers = await getDocs(qExistingUsers);
+      const conflictingUser = snapExistingUsers.docs.find(d => {
+        const uData = d.data();
+        const uRest = (uData.restaurantId || (uData.restaurantIds && uData.restaurantIds[0]) || '').toLowerCase();
+        return uData.role && uData.role !== 'customer' && uRest && uRest !== id.toLowerCase();
+      });
+      if (conflictingUser) {
+        throw new Error('This email is already assigned to a staff or administrator account in another restaurant. Each restaurant must use isolated administrator accounts.');
+      }
+    } catch (checkErr: any) {
+      if (checkErr?.message?.includes('already assigned')) {
+        throw checkErr;
+      }
+    }
+  }
+
   // If ownerPassword is provided, create the Firebase Auth user for the tenant owner
   if (ownerEmail && data.ownerPassword) {
     try {
@@ -379,6 +402,7 @@ export async function createRestaurant(
       reservationsToday: 0,
       revenueThisMonth: 0,
     },
+    supportAccessAllowed: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -629,6 +653,25 @@ export async function updateRestaurantAdminCredentials(
   const cleanEmail = data.ownerEmail.trim().toLowerCase();
   const cleanName = data.ownerName.trim() || 'Restaurant Admin';
   const restaurantId = data.restaurantId;
+
+  if (cleanEmail && !isUserSuperAdmin({ email: cleanEmail } as User)) {
+    try {
+      const qExistingUsers = query(collection(db, 'users'), where('email', '==', cleanEmail));
+      const snapExistingUsers = await getDocs(qExistingUsers);
+      const conflictingUser = snapExistingUsers.docs.find(d => {
+        const uData = d.data();
+        const uRest = (uData.restaurantId || (uData.restaurantIds && uData.restaurantIds[0]) || '').toLowerCase();
+        return uData.role && uData.role !== 'customer' && uRest && uRest !== restaurantId.toLowerCase();
+      });
+      if (conflictingUser) {
+        throw new Error('This email is already assigned to a staff or administrator account in another restaurant.');
+      }
+    } catch (checkErr: any) {
+      if (checkErr?.message?.includes('already assigned')) {
+        throw checkErr;
+      }
+    }
+  }
 
   // 1. Try server-side API proxy route first (securely updates Auth & Firestore)
   try {
@@ -929,6 +972,9 @@ export async function addRestaurantDomain(
   rawDomain: string,
   adminUser?: User | null
 ): Promise<DomainRecord> {
+  if (!isFeatureEnabled('custom_domains')) {
+    throw new Error('Custom domain ingress is currently disabled by platform feature flags.');
+  }
   const cleanDomain = (rawDomain || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const isApex = !cleanDomain.startsWith('www.') && cleanDomain.split('.').length === 2;
   const token = `eata-verify-${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`;
@@ -973,6 +1019,9 @@ export async function verifyRestaurantDomain(
   domainId: string,
   adminUser?: User | null
 ): Promise<{ verified: boolean; sslActive: boolean; message: string }> {
+  if (!isFeatureEnabled('custom_domains')) {
+    return { verified: false, sslActive: false, message: 'Custom domain ingress is currently disabled by platform feature flags.' };
+  }
   try {
     const docRef = doc(db, 'restaurant_domains', domainId);
     const snap = await getDoc(docRef);

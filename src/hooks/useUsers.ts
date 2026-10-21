@@ -1,23 +1,65 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, updateDoc, doc, deleteDoc, setDoc, serverTimestamp, getDoc, query, where } from 'firebase/firestore';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { useAuth } from './useAuth';
 import { useTenantSafe } from './useTenant';
 import { User, DEFAULT_RESTAURANT_ID } from '../types';
+import { doesUserBelongToRestaurant, isUserSuperAdmin, normalizeTenantIdentifier } from '../lib/permissions';
+import {
+  doesUserCountTowardsStaffQuota,
+  checkCanCreateResource,
+  ResourceCreationCheckResult,
+} from '../services/entitlementsService';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export function useUsers() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const { isStaff, isAdmin, isSuperAdmin, loading: authLoading } = useAuth();
+  const { user: currentUser, isStaff, isAdmin, isSuperAdmin, loading: authLoading } = useAuth();
   const tenant = useTenantSafe();
-  const targetRestaurantId = tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
+
+  // Resolve target restaurant strictly from active route / tenant / user membership
+  const targetRestaurantId = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const match = window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        const routeSlug = normalizeTenantIdentifier(match[1]);
+        if (tenant?.tenant && (normalizeTenantIdentifier(tenant.tenant.slug) === routeSlug || normalizeTenantIdentifier(tenant.tenant.id) === routeSlug)) {
+          return normalizeTenantIdentifier(tenant.tenant.id);
+        }
+        return routeSlug;
+      }
+    }
+    if (tenant?.targetRestaurantId) {
+      return normalizeTenantIdentifier(tenant.targetRestaurantId);
+    }
+    if (!isSuperAdmin && currentUser?.restaurantId) {
+      return normalizeTenantIdentifier(currentUser.restaurantId);
+    }
+    return DEFAULT_RESTAURANT_ID;
+  }, [tenant?.targetRestaurantId, tenant?.tenant, isSuperAdmin, currentUser?.restaurantId]);
 
   useEffect(() => {
     if (authLoading || (!isStaff && !isAdmin)) {
-      if (!authLoading) setLoading(false);
+      if (!authLoading) {
+        setUsers([]);
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Strict tenant boundary check for non-super-admin staff/admins
+    if (!isSuperAdmin && !doesUserBelongToRestaurant(currentUser, targetRestaurantId, tenant?.tenant)) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+
+    if (!targetRestaurantId) {
+      setUsers([]);
+      setLoading(false);
       return;
     }
 
@@ -25,16 +67,25 @@ export function useUsers() {
       setLoading(false);
     }, 1200);
 
-    let q;
     const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    
-    if (isSuperAdmin) {
-      q = collection(db, 'users');
-    } else if (isDefault) {
-       // A non-super-admin on the default tenant probably shouldn't be querying the whole db, but we'll try to restrict it
-       q = collection(db, 'users');
+    const isBelaItalia = targetRestaurantId === 'bela-italia' || targetRestaurantId === 'bella-italia';
+
+    let q;
+    if (isDefault) {
+      q = query(
+        collection(db, 'users'),
+        where('restaurantId', 'in', [DEFAULT_RESTAURANT_ID, 'main', 'default-restaurant'])
+      );
+    } else if (isBelaItalia) {
+      q = query(
+        collection(db, 'users'),
+        where('restaurantId', 'in', ['bela-italia', 'bella-italia'])
+      );
     } else {
-      q = query(collection(db, 'users'), where('restaurantId', '==', targetRestaurantId));
+      q = query(
+        collection(db, 'users'),
+        where('restaurantId', '==', targetRestaurantId)
+      );
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -42,15 +93,19 @@ export function useUsers() {
 
       const usersData = snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as User))
-        .filter(u => u.role !== 'customer')
         .filter(u => {
-          // Super admins can view all users
-          if (isSuperAdmin) return true;
-          // Scoped admin/staff can only see users belonging to their restaurant
-          if (isDefault) {
-            return !u.restaurantId || u.restaurantId === DEFAULT_RESTAURANT_ID || u.restaurantId === 'main';
+          // Never list customers or global super_admin accounts in a restaurant's staff list
+          if (u.role === 'customer' || u.role === 'super_admin' || (u.role as any) === 'superadmin') {
+            return false;
           }
-          return u.restaurantId === targetRestaurantId || (u.restaurantIds && u.restaurantIds.includes(targetRestaurantId));
+          if (isUserSuperAdmin(u)) {
+            return false;
+          }
+          // Every staff/admin account must explicitly belong to this targetRestaurantId
+          if (!u.restaurantId && (!u.restaurantIds || u.restaurantIds.length === 0)) {
+            return false;
+          }
+          return doesUserBelongToRestaurant(u, targetRestaurantId, tenant?.tenant);
         });
 
       setUsers(usersData);
@@ -65,69 +120,149 @@ export function useUsers() {
       clearTimeout(safetyTimer);
       unsubscribe();
     };
-  }, [isStaff, isAdmin, isSuperAdmin, authLoading, targetRestaurantId]);
+  }, [isStaff, isAdmin, isSuperAdmin, authLoading, targetRestaurantId, currentUser, tenant?.tenant]);
+
+  // Calculate active staff accounts counting towards the package limit
+  const activeStaffCount = useMemo(() => {
+    return users.filter((u) => doesUserCountTowardsStaffQuota(u, targetRestaurantId, tenant?.tenant)).length;
+  }, [users, targetRestaurantId, tenant?.tenant]);
+
+  const staffLimitCheck: ResourceCreationCheckResult = useMemo(() => {
+    return checkCanCreateResource(tenant?.entitlements, 'staff', activeStaffCount);
+  }, [tenant?.entitlements, activeStaffCount]);
+
+  const verifyAdminTenantAccess = () => {
+    if (!currentUser || (!isAdmin && !isSuperAdmin)) {
+      throw new Error('Unauthorized: Administrator privileges required.');
+    }
+    if (!isSuperAdmin && !doesUserBelongToRestaurant(currentUser, targetRestaurantId, tenant?.tenant)) {
+      throw new Error('Unauthorized: You can only manage users in your own assigned restaurant.');
+    }
+  };
 
   const verifyUserAccess = (id: string) => {
-    if (isSuperAdmin) return true;
-    const exists = users.find(u => u.id === id);
-    if (!exists) {
-      throw new Error(`Unauthorized: User ${id} does not belong to your restaurant.`);
+    verifyAdminTenantAccess();
+    const targetUser = users.find(u => u.id === id);
+    if (!targetUser) {
+      throw new Error(`Unauthorized: User ${id} does not belong to this restaurant.`);
+    }
+    if (!doesUserBelongToRestaurant(targetUser, targetRestaurantId, tenant?.tenant)) {
+      throw new Error(`Unauthorized: User ${id} belongs to another restaurant.`);
     }
     return true;
   };
 
   const updateUserRole = async (id: string, role: string) => {
     verifyUserAccess(id);
-    await updateDoc(doc(db, 'users', id), { role });
+    if (role === 'super_admin' || role === 'superadmin') {
+      throw new Error('Unauthorized: Cannot assign Super Admin role to restaurant users.');
+    }
+    const allowedRole = (role === 'admin' || role === 'restaurant_owner' || role === 'restaurant_manager') ? role : 'staff';
+    await updateDoc(doc(db, 'users', id), { role: allowedRole });
   };
 
   const updateUserStatus = async (id: string, status: 'active' | 'inactive') => {
     verifyUserAccess(id);
+    const targetUser = users.find(u => u.id === id);
+    if (status === 'active' && targetUser?.status !== 'active') {
+      const check = checkCanCreateResource(tenant?.entitlements, 'staff', activeStaffCount);
+      if (!check.allowed) {
+        throw new Error(check.reasonPt || check.reason || 'Staff account limit reached for current subscription package.');
+      }
+    }
     await updateDoc(doc(db, 'users', id), { status });
   };
 
   const updateUser = async (id: string, data: Partial<User>) => {
     verifyUserAccess(id);
-    const updateData = { ...data };
-    if (!isSuperAdmin) {
-      // Prevent changing restaurantId away from target restaurant
-      updateData.restaurantId = targetRestaurantId;
+    const updateData: Record<string, any> = { ...data };
+    if (updateData.role === 'super_admin' || updateData.role === 'superadmin') {
+      delete updateData.role;
     }
+    if (updateData.email) {
+      updateData.email = updateData.email.trim().toLowerCase();
+    }
+    // Strictly lock user to this restaurant tenant
+    updateData.restaurantId = targetRestaurantId;
+    updateData.restaurantIds = [targetRestaurantId];
     await updateDoc(doc(db, 'users', id), updateData);
   };
 
   const addUser = async (userData: Omit<User, 'id'>, password?: string) => {
-    const finalRestaurantId = isSuperAdmin ? (userData.restaurantId || targetRestaurantId) : targetRestaurantId;
+    verifyAdminTenantAccess();
+
+    // Enforce subscription package staff accounts limit
+    const limitCheck = checkCanCreateResource(tenant?.entitlements, 'staff', activeStaffCount);
+    if (!limitCheck.allowed) {
+      throw new Error(
+        limitCheck.reasonPt ||
+        limitCheck.reason ||
+        'Staff account limit reached for your subscription package. Please upgrade to add more staff.'
+      );
+    }
+
+    const finalRestaurantId = normalizeTenantIdentifier(
+      isSuperAdmin ? (userData.restaurantId || targetRestaurantId) : targetRestaurantId
+    );
+
+    if (!finalRestaurantId) {
+      throw new Error('Cannot create staff or admin account without a valid restaurant assignment.');
+    }
+
+    const cleanEmail = (userData.email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error('Email address is required.');
+    }
+
+    const allowedRole =
+      userData.role === 'admin' ||
+      userData.role === 'restaurant_owner' ||
+      userData.role === 'restaurant_manager'
+        ? userData.role
+        : 'staff';
+
     const userToSave = {
       ...userData,
-      restaurantId: finalRestaurantId
+      email: cleanEmail,
+      role: allowedRole,
+      restaurantId: finalRestaurantId,
+      restaurantIds: [finalRestaurantId],
     };
 
     if (password) {
-      // Create or reuse a secondary app to avoid logging out the admin
       const secondaryApp = getApps().find(app => app.name === 'secondary') || initializeApp(firebaseConfig, 'secondary');
       const secondaryAuth = getAuth(secondaryApp);
       
       try {
         let result;
         try {
-          result = await createUserWithEmailAndPassword(secondaryAuth, userData.email, password);
+          result = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
         } catch (initialErr: any) {
           if (initialErr.code === 'auth/email-already-in-use') {
-            // It's possible the user was deleted from the db but orphaned in Auth.
+            // Only clean up if the email is an orphaned Auth record (NOT an active user in another restaurant!)
             try {
+              const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
               const res = await fetch('/api/admin/delete-user-by-email', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: userData.email })
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({
+                  email: cleanEmail,
+                  restaurantId: finalRestaurantId,
+                })
               });
               if (res.ok) {
-                result = await createUserWithEmailAndPassword(secondaryAuth, userData.email, password);
+                result = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
               } else {
-                throw initialErr;
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(
+                  errData.error || 'This email is already registered to another account. Please use a unique email address.'
+                );
               }
-            } catch (cleanupErr) {
-               throw initialErr;
+            } catch (cleanupErr: any) {
+              throw cleanupErr?.message ? cleanupErr : initialErr;
             }
           } else {
             throw initialErr;
@@ -139,6 +274,8 @@ export function useUsers() {
           ...userToSave,
           id: uid,
           authUid: uid,
+          restaurantId: finalRestaurantId,
+          restaurantIds: [finalRestaurantId],
           createdAt: serverTimestamp(),
         });
         
@@ -148,12 +285,14 @@ export function useUsers() {
         throw error;
       }
     } else {
-      let friendlyId = userData.email ? userData.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'user';
+      let friendlyId = cleanEmail ? cleanEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'user';
       friendlyId += '-' + Math.random().toString(36).substring(2, 6);
       
       await setDoc(doc(db, 'users', friendlyId), {
         ...userToSave,
         id: friendlyId,
+        restaurantId: finalRestaurantId,
+        restaurantIds: [finalRestaurantId],
         createdAt: serverTimestamp(),
       });
     }
@@ -167,24 +306,28 @@ export function useUsers() {
       
       const userDoc = await getDoc(doc(db, 'users', id));
       if (userDoc.exists()) {
-        authUid = userDoc.data().authUid || userDoc.data().id;
-        email = userDoc.data().email;
+        const docData = userDoc.data() as User;
+        if (!isSuperAdmin && !doesUserBelongToRestaurant(docData, targetRestaurantId, tenant?.tenant)) {
+          throw new Error('Unauthorized: Cannot delete a user belonging to another restaurant.');
+        }
+        authUid = docData.authUid || docData.id;
+        email = docData.email;
       }
       
-      if (!authUid && !email) {
-        const custDoc = await getDoc(doc(db, 'customers', id));
-        if (custDoc.exists()) {
-          authUid = custDoc.data().authUid;
-          email = custDoc.data().email;
-        }
-      }
-
       if ((authUid && authUid.length > 10) || email) { 
         try {
+          const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
           const res = await fetch('/api/admin/delete-user', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: authUid || null, email: email || null })
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              uid: authUid || null,
+              email: email || null,
+              restaurantId: targetRestaurantId,
+            })
           });
           if (!res.ok) {
             console.error('Failed to delete auth user');
@@ -195,12 +338,21 @@ export function useUsers() {
       }
 
       await deleteDoc(doc(db, 'users', id));
-      await deleteDoc(doc(db, 'customers', id));
     } catch (err) {
       console.error('Error deleting user:', err);
       throw err;
     }
   };
 
-  return { users, loading, updateUserRole, updateUserStatus, updateUser, addUser, deleteUser };
+  return {
+    users,
+    loading,
+    activeStaffCount,
+    staffLimitCheck,
+    updateUserRole,
+    updateUserStatus,
+    updateUser,
+    addUser,
+    deleteUser,
+  };
 }

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useFeatureFlags } from '../services/featureFlagsService';
 
 type Language = 'en' | 'pt';
 
@@ -572,6 +573,75 @@ const translations = {
     'notfound.my_bookings': 'My Bookings',
     'notfound.need_help': 'Need assistance?',
     'notfound.contact_us': 'Contact us directly',
+    // Membership, Packages & Plans
+    'membership.title': 'Membership',
+    'membership.active_package': 'Active Package',
+    'membership.annual_billing': 'Annual Billing',
+    'membership.monthly_billing': 'Monthly Billing',
+    'membership.change_upgrade': 'Change / Upgrade',
+    'membership.see_plans': 'See Plans',
+    'membership.active_plan': 'Active Plan',
+    'membership.monthly_bookings': 'Monthly Bookings',
+    'membership.staff_accounts': 'Staff Accounts',
+    'membership.dining_tables': 'Dining Tables',
+    'membership.remaining': 'remaining',
+    'membership.slots': 'slots',
+    'membership.available': 'available',
+    'membership.unlimited': 'Unlimited',
+    'membership.manage': 'Manage',
+    'membership.floor_plan': 'Floor Plan',
+    'membership.included_features': 'Included Features:',
+    'membership.included': 'Included',
+    'membership.not_included': 'Not included',
+    'membership.plans_modal_title': 'Subscription Plans',
+    'membership.plans_modal_desc': 'Compare available plans and choose the ideal package for your restaurant.',
+    'plans.choose_cycle': 'Choose Your Billing Cycle',
+    'plans.cycle_desc': 'Save up to 20% with annual upfront billing or maintain complete monthly flexibility.',
+    'plans.monthly': 'Monthly',
+    'plans.annual': 'Annual',
+    'plans.save_20': 'Save 20%',
+    'plans.most_popular': 'Most Popular',
+    'plans.active_plan': 'Active Plan',
+    'plans.upgrade_plan': 'Upgrade Plan',
+    'plans.select_plan': 'Select Plan',
+    'plans.free': 'Free',
+    'plans.trial_days': '14 days',
+    'plans.per_month': '/mo',
+    'plans.per_year': '/yr',
+    'plans.bookings_month': 'Monthly Bookings',
+    'plans.staff_accounts': 'Staff Accounts',
+    'plans.max_tables': 'Max Dining Tables',
+    'feature.smart_alerts': 'Smart Alerts',
+    'feature.custom_domain': 'Custom Subdomain/Domain',
+    'feature.whatsapp': 'WhatsApp Action',
+    'feature.sms': 'SMS Reminders',
+    'feature.advanced_seo': 'Advanced SEO',
+    'feature.waitlist': 'Waitlist Management',
+    'feature.advanced_analytics': 'Advanced Analytics',
+    'feature.api_access': 'API Webhooks & Integrations',
+    'plan_change.confirm_title': 'Confirm Plan Change',
+    'plan_change.confirm_desc': 'Review details before finalizing',
+    'plan_change.current_plan': 'Current Plan:',
+    'plan_change.target_plan': 'Target Plan:',
+    'plan_change.new_price': 'New Price:',
+    'plan_change.billing_notice': 'Billing Notice',
+    'plan_change.upgrade_notice': 'Your plan will be upgraded immediately. An invoice will be generated and billed to your default saved payment method.',
+    'plan_change.downgrade_notice': 'The change will take effect starting from your next billing renewal date. You retain full current limits until then.',
+    'plan_change.cancel': 'Go Back',
+    'plan_change.confirm': 'Confirm & Switch',
+    'plan_change.processing': 'Processing...',
+    'settings.assistance_requests': 'Assistance Requests',
+    'settings.assistance_support': 'Restaurant Assistance & Support',
+    'settings.assistance_desc': 'Request help from platform administrators or track the status of your submitted assistance tickets.',
+    'settings.request_assistance': 'Request Assistance',
+    'settings.assistance_tickets': 'Your Assistance Tickets',
+    'settings.no_assistance': 'No assistance requests submitted yet.',
+    'settings.submit_first_request': 'Submit your first request',
+    'settings.admin_response': 'Admin Response:',
+    'settings.assistance_modal_desc': 'Describe the issue or assistance needed. Platform administrators will review your ticket and update the status.',
+    'settings.issue_description': 'Issue Description',
+    'settings.issue_placeholder': 'Describe your issue or request in detail...',
+    'settings.submit_request': 'Submit Request',
   },
   pt: {
     'nav.book': 'Reservar Mesa',
@@ -1136,26 +1206,113 @@ const translations = {
     'notfound.my_bookings': 'Minhas Reservas',
     'notfound.need_help': 'Precisa de ajuda?',
     'notfound.contact_us': 'Contacte-nos diretamente',
+    // Membership, Packages & Plans
+    'membership.title': 'Subscrição',
+    'membership.active_package': 'Pacote Ativo',
+    'membership.annual_billing': 'Faturação Anual',
+    'membership.monthly_billing': 'Faturação Mensal',
+    'membership.change_upgrade': 'Mudar / Fazer Upgrade',
+    'membership.see_plans': 'Ver Planos',
+    'membership.active_plan': 'Plano Ativo',
+    'membership.monthly_bookings': 'Reservas Mensais',
+    'membership.staff_accounts': 'Contas de Staff',
+    'membership.dining_tables': 'Mesas de Sala',
+    'membership.remaining': 'restantes',
+    'membership.slots': 'vagas',
+    'membership.available': 'disponíveis',
+    'membership.unlimited': 'Ilimitado',
+    'membership.manage': 'Gerir',
+    'membership.floor_plan': 'Planta',
+    'membership.included_features': 'Recursos Incluídos:',
+    'membership.included': 'Incluído',
+    'membership.not_included': 'Não incluído',
+    'membership.plans_modal_title': 'Planos de Subscrição',
+    'membership.plans_modal_desc': 'Compare planos disponíveis e selecione o melhor para o seu restaurante.',
+    'plans.choose_cycle': 'Escolha o Ciclo de Faturação',
+    'plans.cycle_desc': 'Poupe até 20% com o pagamento anual ou mantenha a flexibilidade mensal.',
+    'plans.monthly': 'Mensal',
+    'plans.annual': 'Anual',
+    'plans.save_20': '-20% Desconto',
+    'plans.most_popular': 'Mais Popular',
+    'plans.active_plan': 'Plano Ativo',
+    'plans.upgrade_plan': 'Fazer Upgrade',
+    'plans.select_plan': 'Selecionar Plano',
+    'plans.free': 'Grátis',
+    'plans.trial_days': '14 dias',
+    'plans.per_month': '/mês',
+    'plans.per_year': '/ano',
+    'plans.bookings_month': 'Reservas / mês',
+    'plans.staff_accounts': 'Contas de Staff',
+    'plans.max_tables': 'Mesas de Refeição',
+    'feature.smart_alerts': 'Alertas Inteligentes',
+    'feature.custom_domain': 'Domínio / Subdomínio Próprio',
+    'feature.whatsapp': 'Ações WhatsApp',
+    'feature.sms': 'Lembretes SMS',
+    'feature.advanced_seo': 'SEO Avançado',
+    'feature.waitlist': 'Gestão de Lista de Espera',
+    'feature.advanced_analytics': 'Análises Avançadas',
+    'feature.api_access': 'API REST & Webhooks',
+    'plan_change.confirm_title': 'Confirmar Mudança de Plano',
+    'plan_change.confirm_desc': 'Reveja os detalhes antes de confirmar',
+    'plan_change.current_plan': 'Plano Atual:',
+    'plan_change.target_plan': 'Novo Plano Escolhido:',
+    'plan_change.new_price': 'Novo Preço:',
+    'plan_change.billing_notice': 'Informações de Faturação',
+    'plan_change.upgrade_notice': 'O upgrade entrará em vigor de imediato. Será gerada uma fatura correspondente e o seu método de pagamento padrão será utilizado.',
+    'plan_change.downgrade_notice': 'A mudança para o novo plano terá efeito a partir do próximo ciclo de faturação. Manterá os seus limites atuais até lá.',
+    'plan_change.cancel': 'Voltar',
+    'plan_change.confirm': 'Confirmar Mudança',
+    'plan_change.processing': 'A processar...',
+    'settings.assistance_requests': 'Pedidos de Assistência',
+    'settings.assistance_support': 'Assistência & Suporte ao Restaurante',
+    'settings.assistance_desc': 'Solicite ajuda aos administradores da plataforma ou acompanhe o estado dos seus pedidos de assistência.',
+    'settings.request_assistance': 'Pedir Assistência',
+    'settings.assistance_tickets': 'Os Seus Tickets de Assistência',
+    'settings.no_assistance': 'Ainda não foram submetidos pedidos de assistência.',
+    'settings.submit_first_request': 'Submeter o seu primeiro pedido',
+    'settings.admin_response': 'Resposta do Administrador:',
+    'settings.assistance_modal_desc': 'Descreva o problema ou assistência necessária. Os administradores da plataforma irão analisar o seu pedido e atualizar o estado.',
+    'settings.issue_description': 'Descrição do Problema',
+    'settings.issue_placeholder': 'Descreva o seu problema ou pedido em detalhe...',
+    'settings.submit_request': 'Submeter Pedido',
   }
 };
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem('language');
-    return (saved as Language) || 'en';
+  const { isFeatureEnabled } = useFeatureFlags();
+  const multiLanguageEnabled = isFeatureEnabled('multi_language');
+
+  const [rawLanguage, setRawLanguage] = useState<Language>(() => {
+    try {
+      const saved = (localStorage.getItem('language') || '').toLowerCase();
+      if (saved.startsWith('pt')) return 'pt';
+    } catch {}
+    return 'en';
   });
 
+  // When multi_language feature flag is disabled, force English across the platform
+  const language: Language = multiLanguageEnabled ? (rawLanguage === 'pt' ? 'pt' : 'en') : 'en';
+
+  const setLanguage = React.useCallback((lang: Language) => {
+    const normalized: Language = String(lang).toLowerCase().startsWith('pt') ? 'pt' : 'en';
+    if (!multiLanguageEnabled && normalized !== 'en') return;
+    setRawLanguage(normalized);
+  }, [multiLanguageEnabled]);
+
   useEffect(() => {
-    localStorage.setItem('language', language);
+    try {
+      localStorage.setItem('language', language);
+    } catch {}
     if (typeof document !== 'undefined') {
       document.documentElement.lang = language === 'pt' ? 'pt-PT' : 'en';
     }
   }, [language]);
 
   const t = React.useCallback((key: string) => {
-    return translations[language][key as keyof typeof translations['en']] || key;
+    const dict = translations[language] || translations.en;
+    return dict[key as keyof typeof translations['en']] || translations.en[key as keyof typeof translations['en']] || key;
   }, [language]);
 
   return (

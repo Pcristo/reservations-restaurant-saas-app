@@ -48,6 +48,7 @@ import 'react-phone-number-input/style.css';
 import { APP_CONFIG } from '../data/appConfig';
 import CustomDropdown, { DropdownOption } from '../components/CustomDropdown';
 import { checkReservationConflict } from '../features/reservations/conflictDetection';
+import { useFeatureFlags } from '../services/featureFlagsService';
 
 dayjs.extend(customParseFormat);
 
@@ -59,6 +60,8 @@ export default function AdminReservations() {
   const location = useLocation();
   const { slug } = useParams<{ slug?: string }>();
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const waitlistEnabled = isFeatureEnabled('waitlist_management');
   const tenant = useTenantSafe();
   const rawSlug = slug || tenant?.slug || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]) || 'bela-italia';
   const currentSlug = rawSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawSlug;
@@ -244,7 +247,9 @@ export default function AdminReservations() {
     { value: 'no-show', label: t('res.no_show') || t('res.no-show') || "No-show", colorDot: 'bg-gray-500' },
     { value: 'completed', label: t('res.completed'), colorDot: 'bg-yellow-400' },
     { value: 'cancelled', label: t('res.cancelled'), colorDot: 'bg-red-500' },
-    { value: 'waiting-list', label: t('res.waiting-list'), colorDot: 'bg-gray-400' },
+    ...(waitlistEnabled || (editingRes && editingRes.status === 'waiting-list')
+      ? [{ value: 'waiting-list', label: t('res.waiting-list'), colorDot: 'bg-gray-400' }]
+      : []),
   ];
   useEffect(() => {
     if (editingRes) {
@@ -3154,35 +3159,37 @@ export default function AdminReservations() {
                   </div>
 
                 <div className="flex flex-row items-center gap-8 pt-2">
-                  <div className="flex items-center gap-3">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="sr-only peer"
-                        checked={editingRes ? (editingRes.isWaitlist || false) : (newRes.isWaitlist || false)}
-                        onChange={(e) => {
-                          const isChecked = e.target.checked;
-                          if (editingRes) {
-                            setEditingRes({ 
-                              ...editingRes, 
-                              isWaitlist: isChecked,
-                              status: (isChecked ? 'waiting-list' : (editingRes.status === 'waiting-list' ? 'booked' : editingRes.status)) as Reservation['status'],
-                              tableId: isChecked ? "" : editingRes.tableId
-                            });
-                          } else {
-                            setNewRes({ 
-                              ...newRes, 
-                              isWaitlist: isChecked,
-                              status: (isChecked ? 'waiting-list' : (newRes.status === 'waiting-list' ? 'booked' : newRes.status)) as Reservation['status'],
-                              tableId: isChecked ? "" : newRes.tableId
-                            });
-                          }
-                        }}
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
-                    </label>
-                    <span className="text-sm font-bold text-gray-700">{t('res.waitlist')}</span>
-                  </div>
+                  {waitlistEnabled && (
+                    <div className="flex items-center gap-3">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer"
+                          checked={editingRes ? (editingRes.isWaitlist || false) : (newRes.isWaitlist || false)}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            if (editingRes) {
+                              setEditingRes({ 
+                                ...editingRes, 
+                                isWaitlist: isChecked,
+                                status: (isChecked ? 'waiting-list' : (editingRes.status === 'waiting-list' ? 'booked' : editingRes.status)) as Reservation['status'],
+                                tableId: isChecked ? "" : editingRes.tableId
+                              });
+                            } else {
+                              setNewRes({ 
+                                ...newRes, 
+                                isWaitlist: isChecked,
+                                status: (isChecked ? 'waiting-list' : (newRes.status === 'waiting-list' ? 'booked' : newRes.status)) as Reservation['status'],
+                                tableId: isChecked ? "" : newRes.tableId
+                              });
+                            }
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                      </label>
+                      <span className="text-sm font-bold text-gray-700">{t('res.waitlist')}</span>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-3">
                     <label className="relative inline-flex items-center cursor-pointer">

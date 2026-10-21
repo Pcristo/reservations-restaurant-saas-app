@@ -1,19 +1,29 @@
 import { motion, AnimatePresence } from 'motion/react';
-import React from 'react';
+import React, { useState } from 'react';
 import { useReservations } from '../hooks/useReservations';
 import { useSmartAlerts } from '../hooks/useSmartAlerts';
 import { useTables } from '../hooks/useTables';
 import { useCustomers } from '../hooks/useCustomers';
+import { useUsers } from '../hooks/useUsers';
 import { useLanguage } from '../hooks/useLanguage';
 import { pt } from 'date-fns/locale';
 import { format, isToday, parseISO, addMinutes, isBefore, isSameDay } from 'date-fns';
-import { Calendar, Sun, Moon, Minimize2, Users, Map, TrendingUp, Clock, CheckCircle, XCircle, Lock, Eye, EyeOff, Pencil, X, AlertCircle, Search, Globe, Copy, Check, User, ArrowLeft, ArrowLeftToLine, Trash2, AlertTriangle, Settings, ChevronDown, CreditCard } from 'lucide-react';
+import { Calendar, Sun, Moon, Minimize2, Users, Map, TrendingUp, Clock, CheckCircle, XCircle, Lock, Eye, EyeOff, Pencil, X, AlertCircle, Search, Globe, Copy, Check, User, ArrowLeft, ArrowLeftToLine, Trash2, AlertTriangle, Settings, ChevronDown, CreditCard, Sparkles, LifeBuoy } from 'lucide-react';
 import { MdTableRestaurant } from 'react-icons/md';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../hooks/useSettings';
 import { useTenantSafe } from '../hooks/useTenant';
-import { DEFAULT_RESTAURANT_ID } from '../types';
+import {
+  formatResourceAllowance,
+  isPackageFeatureEnabled,
+  getLocalizedPlanName,
+  getLocalizedPlanDescription,
+} from '../services/entitlementsService';
+import { DEFAULT_RESTAURANT_ID, Plan, BillingFrequency, RestaurantSubscription } from '../types';
+import { PlanComparisonSection } from '../features/billing/components/PlanComparisonSection';
+import { ChangePlanModal } from '../features/billing/components/ChangePlanModal';
+import { changeSubscriptionPlan } from '../services/billingService';
 import { cn, formatDisplayTime, getEffectiveOpeningHours } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import PhoneInput from 'react-phone-number-input';
@@ -24,6 +34,8 @@ import customParseFormat from 'dayjs/plugin/customParseFormat';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Customer } from '../types';
+import { useFeatureFlags } from '../services/featureFlagsService';
+import { createAssistanceRequest } from '../services/assistanceService';
 
 dayjs.extend(customParseFormat);
 
@@ -41,6 +53,7 @@ const MONTH_OPTIONS = [
   { value: '11', pt: 'Novembro', en: 'November' },
   { value: '12', pt: 'Dezembro', en: 'December' },
 ];
+
 
 const getTranslatedAlertTitle = (title: string, lang: string) => {
   if (lang === 'pt') {
@@ -130,19 +143,25 @@ const getTranslatedAlertMessage = (alert: any, lang: string) => {
 };
 
 export default function AdminDashboard() {
+  const [isAssistanceModalOpen, setIsAssistanceModalOpen] = useState(false);
+  const [assistanceDescription, setAssistanceDescription] = useState('');
+  const [isSubmittingAssistance, setIsSubmittingAssistance] = useState(false);
   const navigate = useNavigate();
   const { slug } = useParams<{ slug?: string }>();
   const location = useLocation();
   const { user, isStaff, isAdmin, loading: authLoading } = useAuth();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const waitlistEnabled = isFeatureEnabled('waitlist_management');
   const tenant = useTenantSafe();
   const rawSlug = slug || tenant?.slug || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]) || 'bela-italia';
   const currentSlug = rawSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawSlug;
   const { settings } = useSettings(currentSlug);
   const isStaffRoute = location.pathname.includes('/staff');
   const adminBase = isStaffRoute ? `/r/${currentSlug}/staff` : `/r/${currentSlug}/admin`;
-  const { reservations, updateReservation, loading: resLoading } = useReservations({ includeAll: true });
-  const { tables, loading: tablesLoading } = useTables();
+  const { reservations, updateReservation, loading: resLoading, bookingUsage } = useReservations({ includeAll: true });
+  const { tables, loading: tablesLoading, tableLimitCheck } = useTables();
   const { customers, loading: custLoading } = useCustomers();
+  const { users, activeStaffCount, staffLimitCheck } = useUsers();
   const { t, language } = useLanguage();
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -176,14 +195,8 @@ export default function AdminDashboard() {
   React.useEffect(() => {
     if (authLoading || (!isStaff && !isAdmin)) return;
     
-    let q;
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    
-    if (isDefault) {
-      q = collection(db, 'users');
-    } else {
-      q = query(collection(db, 'users'), where('restaurantId', '==', targetRestaurantId));
-    }
+    const effectiveRestId = currentSlug || tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
+    const q = query(collection(db, 'users'), where('restaurantId', '==', effectiveRestId));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersMap: Record<string, { id?: string; email: string; status: string; createdAt?: any }> = {};
@@ -212,7 +225,7 @@ export default function AdminDashboard() {
     });
 
     return () => unsubscribe();
-  }, [isStaff, isAdmin, authLoading]);
+  }, [isStaff, isAdmin, authLoading, currentSlug, tenant?.targetRestaurantId]);
 
   const isCustomerRegistered = (c: Customer) => {
     return !!(c.isRegistered || registeredUsers[c.id] || (c.email && registeredUsers[c.email.toLowerCase()]));
@@ -228,6 +241,42 @@ export default function AdminDashboard() {
   const [alertToResolve, setAlertToResolve] = React.useState<string | null>(null);
   const [alertToDelete, setAlertToDelete] = React.useState<string | null>(null);
   const [alertTypeFilter, setAlertTypeFilter] = React.useState('all');
+  const [statsVisible, setStatsVisible] = React.useState(true);
+  const [isMembershipAccordionOpen, setIsMembershipAccordionOpen] = React.useState(false);
+  const [showPlansModal, setShowPlansModal] = React.useState(false);
+  const [selectedPlanForChange, setSelectedPlanForChange] = React.useState<Plan | null>(null);
+  const [targetFrequency, setTargetFrequency] = React.useState<BillingFrequency>('monthly');
+  const [isChangePlanModalOpen, setIsChangePlanModalOpen] = React.useState(false);
+  const [isChangePlanLoading, setIsChangePlanLoading] = React.useState(false);
+
+  const handleSelectPlan = (plan: Plan, freq: BillingFrequency) => {
+    setSelectedPlanForChange(plan);
+    setTargetFrequency(freq);
+    setIsChangePlanModalOpen(true);
+  };
+
+  const handleConfirmPlanChange = async () => {
+    if (!selectedPlanForChange) return;
+    try {
+      setIsChangePlanLoading(true);
+      await changeSubscriptionPlan(currentSlug, selectedPlanForChange.id, targetFrequency, user);
+      if (tenant?.refreshTenant) {
+        await tenant.refreshTenant();
+      }
+      toast.success(
+        language === 'pt'
+          ? `Plano alterado para ${getLocalizedPlanName(selectedPlanForChange, language)} com sucesso!`
+          : `Subscription successfully updated to ${getLocalizedPlanName(selectedPlanForChange, language)}!`
+      );
+      setIsChangePlanModalOpen(false);
+      setShowPlansModal(false);
+    } catch (err: any) {
+      console.error('[AdminDashboard] Error changing plan:', err);
+      toast.error(err?.message || (language === 'pt' ? 'Erro ao alterar plano' : 'Failed to update subscription'));
+    } finally {
+      setIsChangePlanLoading(false);
+    }
+  };
   
   const previousAlertCount = React.useRef(0);
   React.useEffect(() => {
@@ -1947,6 +1996,17 @@ const FloorPlanFilterDropdown: React.FC<{
             </div>
           )}
 
+          {/* Assistance Request Button (Always Visible) */}
+          <div className="mb-6 flex justify-end">
+            <button
+              onClick={() => setIsAssistanceModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <LifeBuoy size={13} />
+              <span>Request Assistance</span>
+            </button>
+          </div>
+
           <div className="flex flex-col lg:flex-row gap-6 mb-8">
             <div className="flex-1 space-y-6">
               <div className="flex items-center justify-between">
@@ -1996,67 +2056,80 @@ const FloorPlanFilterDropdown: React.FC<{
               </p>
             </div>
           </div>
-          
-{/* Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
-            {stats.map((stat: any, index: number) => {
-              const content = (
-                <>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center", stat.color)}>
-                        <stat.icon size={22} className="w-[22px] h-[22px] text-current" />
-                      </div>
-                      <div className="flex flex-col text-left">
-                        <div className={cn(
-                          "text-3xl font-bold transition-colors leading-none mb-1.5 flex items-center flex-wrap sm:flex-nowrap",
-                          settings?.theme === 'dark' ? "text-white" : "text-gray-900"
-                        )}>
-                          <span>{stat.value}</span>
-                          {stat.subStats}
+
+
+          <AnimatePresence>
+            {statsVisible && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
+                  {stats.map((stat: any, index: number) => {
+                    const content = (
+                      <>
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={cn("p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center", stat.color)}>
+                              <stat.icon size={22} className="w-[22px] h-[22px] text-current" />
+                            </div>
+                            <div className="flex flex-col text-left">
+                              <div className={cn(
+                                "text-3xl font-bold transition-colors leading-none mb-1.5 flex items-center flex-wrap sm:flex-nowrap",
+                                settings?.theme === 'dark' ? "text-white" : "text-gray-900"
+                              )}>
+                                <span>{stat.value}</span>
+                                {stat.subStats}
+                              </div>
+                              <div className={cn(
+                                "text-sm font-medium transition-colors leading-none",
+                                settings?.theme === 'dark' ? "text-gray-400" : "text-gray-500"
+                              )}>{stat.label}</div>
+                            </div>
+                          </div>
+                          <TrendingUp size={15} className="text-gray-300 shrink-0 mt-0.5" />
                         </div>
-                        <div className={cn(
-                          "text-sm font-medium transition-colors leading-none",
-                          settings?.theme === 'dark' ? "text-gray-400" : "text-gray-500"
-                        )}>{stat.label}</div>
-                      </div>
-                    </div>
-                    <TrendingUp size={15} className="text-gray-300 group-hover:text-amber-500 transition-colors shrink-0 mt-0.5" />
-                  </div>
-                </>
-              );
+                      </>
+                    );
 
-              if (stat.onClick) {
-                return (
-                  <button
-                    key={index}
-                    onClick={stat.onClick}
-                    className={cn(
-                      "p-5 rounded-2xl shadow-sm border transition-all group w-full cursor-pointer text-left focus:outline-none",
-                      settings?.theme === 'dark' ? "bg-gray-950 border-gray-800 hover:bg-gray-900/60" : "bg-white border-gray-100 hover:shadow-md"
-                    )}
-                  >
-                    {content}
-                  </button>
-                );
-              }
+                    if (stat.onClick) {
+                      return (
+                        <button
+                          key={index}
+                          onClick={stat.onClick}
+                          className={cn(
+                            "p-5 rounded-2xl shadow-sm border w-full text-left focus:outline-none",
+                            settings?.theme === 'dark' ? "bg-gray-950 border-gray-800" : "bg-white border-gray-100"
+                          )}
+                        >
+                          {content}
+                        </button>
+                      );
+                    }
 
-              return (
-                <Link 
-                  key={index} 
-                  to={stat.link!}
-                  className={cn(
-                    "p-5 rounded-2xl shadow-sm border transition-all group",
-                    settings?.theme === 'dark' ? "bg-gray-950 border-gray-800 hover:bg-gray-900/60" : "bg-white border-gray-100 hover:shadow-md"
-                  )}
-                >
-                  {content}
-                </Link>
-              );
-            })}
-          </div>
+                    return (
+                      <Link 
+                        key={index} 
+                        to={stat.link!}
+                        className={cn(
+                          "p-5 rounded-2xl shadow-sm border",
+                          settings?.theme === 'dark' ? "bg-gray-950 border-gray-800" : "bg-white border-gray-100"
+                        )}
+                      >
+                        {content}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Recent Reservations */}
         <div className={cn(
           "p-6 rounded-2xl shadow-sm border transition-colors flex flex-col h-[450px]",
@@ -2133,13 +2206,13 @@ const FloorPlanFilterDropdown: React.FC<{
                 )}
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
-                <p>{t('res.no_bookings')}.</p>
+              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 py-12">
+                <p className="text-sm font-medium">{t('res.no_bookings')}.</p>
               </div>
             )}
+          </div>
         </div>
 
-        </div>
         {/* Upcoming Reports */}
         <div className={cn(
           "p-6 rounded-2xl shadow-sm border transition-colors flex flex-col h-[450px]",
@@ -2316,35 +2389,35 @@ const FloorPlanFilterDropdown: React.FC<{
           <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-4 pr-1">
             <Link 
               to={`${adminBase}/live`} 
-              className="flex flex-col items-center justify-center p-4 bg-green-50 text-green-700 rounded-2xl hover:bg-green-100 transition-colors gap-2 group text-center"
+              className="flex flex-col items-center justify-center p-4 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 rounded-2xl gap-2 text-center"
             >
-              <Map size={24} className="group-hover:scale-110 transition-transform" />
+              <Map size={24} />
               <span className="font-bold text-xs text-center">{t('nav.live_view')}</span>
             </Link>
             <Link 
               to={`${adminBase}/reservations`} 
-              className="flex flex-col items-center justify-center p-4 bg-amber-50 text-amber-700 rounded-2xl hover:bg-amber-100 transition-colors gap-2 group text-center"
+              className="flex flex-col items-center justify-center p-4 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded-2xl gap-2 text-center"
             >
-              <Calendar size={24} className="group-hover:scale-110 transition-transform" />
+              <Calendar size={24} />
               <span className="font-bold text-xs text-center">{t('res.new')}</span>
             </Link>
             <Link 
               to={`${adminBase}/tables`} 
-              className="flex flex-col items-center justify-center p-4 bg-blue-50 text-blue-700 rounded-2xl hover:bg-blue-100 transition-colors gap-2 group text-center"
+              className="flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 rounded-2xl gap-2 text-center"
             >
-              <MdTableRestaurant size={24} className="group-hover:scale-110 transition-transform" />
+              <MdTableRestaurant size={24} />
               <span className="font-bold text-xs text-center">{isAdmin ? t('tables.edit') : t('nav.tables')}</span>
             </Link>
             {isAdmin ? (
               <Link 
                 to={`${adminBase}/settings`} 
-                className="flex flex-col items-center justify-center p-4 bg-purple-50 text-purple-700 rounded-2xl hover:bg-purple-100 transition-colors gap-2 group text-center"
+                className="flex flex-col items-center justify-center p-4 bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 rounded-2xl gap-2 text-center"
               >
-                <Settings size={24} className="group-hover:scale-110 transition-transform" />
+                <Settings size={24} />
                 <span className="font-bold text-xs text-center">{t('nav.settings')}</span>
               </Link>
             ) : (
-              <div className="flex flex-col items-center justify-center p-4 bg-gray-50 text-gray-400 rounded-2xl gap-2 cursor-not-allowed text-center">
+              <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-800 text-gray-400 rounded-2xl gap-2 cursor-not-allowed text-center">
                 <Lock size={24} />
                 <span className="font-bold text-xs text-center">{t('nav.settings')}</span>
               </div>
@@ -2353,23 +2426,306 @@ const FloorPlanFilterDropdown: React.FC<{
               <>
                 <Link 
                   to={`${adminBase}/users`} 
-                  className="flex flex-col items-center justify-center p-4 bg-indigo-50 text-indigo-700 rounded-2xl hover:bg-indigo-100 transition-colors gap-2 group text-center"
+                  className="flex flex-col items-center justify-center p-4 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 rounded-2xl gap-2 text-center"
                 >
-                  <Users size={24} className="group-hover:scale-110 transition-transform" />
+                  <Users size={24} />
                   <span className="font-bold text-xs text-center">{t('nav.users')}</span>
                 </Link>
                 <Link 
                   to={`${adminBase}/billing`} 
-                  className="flex flex-col items-center justify-center p-4 bg-amber-50 text-amber-700 rounded-2xl hover:bg-amber-100 transition-colors gap-2 group text-center"
+                  className="flex flex-col items-center justify-center p-4 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded-2xl gap-2 text-center"
                 >
-                  <CreditCard size={24} className="group-hover:scale-110 transition-transform" />
+                  <CreditCard size={24} />
                   <span className="font-bold text-xs text-center">{language === 'pt' ? 'Faturação' : 'Billing'}</span>
                 </Link>
               </>
             )}
-          </div>
         </div>
       </div>
+
+      {/* Dynamic Subscription Package & Resource Usage Widget inside Collapsible Membership Accordion */}
+      {tenant?.plan && (
+        <div className={cn(
+          "lg:col-span-3 rounded-2xl border shadow-xs overflow-hidden",
+          settings?.theme === 'dark' ? "bg-gray-950 border-gray-800" : "bg-white border-gray-100"
+        )}>
+          {/* Accordion Toggle Header Button */}
+          <button
+            type="button"
+            onClick={() => setIsMembershipAccordionOpen((prev) => !prev)}
+            aria-expanded={isMembershipAccordionOpen}
+            aria-controls="membership-accordion-panel"
+            className="w-full p-5 sm:p-6 flex items-center justify-between text-left transition-colors cursor-pointer select-none"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
+                <Sparkles size={20} />
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="text-base sm:text-lg font-black text-gray-900 dark:text-white tracking-tight">
+                  {language === 'pt' ? 'Subscrição' : 'Membership'}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-gray-400">
+              <ChevronDown
+                size={20}
+                className={cn(
+                  "transition-transform duration-200",
+                  isMembershipAccordionOpen && "rotate-180"
+                )}
+              />
+            </div>
+          </button>
+
+          {/* Accordion Content Panel with Smooth Height and Opacity Transition */}
+          <AnimatePresence initial={false}>
+            {isMembershipAccordionOpen && (
+              <motion.div
+                id="membership-accordion-panel"
+                key="membership-accordion-content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.28, ease: [0.04, 0.62, 0.23, 0.98] }}
+                className="overflow-hidden"
+              >
+                <div className="p-6 pt-0 border-t border-gray-100 dark:border-gray-800/80">
+              {/* Header row with Package Info & Buttons */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-5 pb-5 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-2xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
+                    <Sparkles size={24} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h2 className="text-xl font-black text-[#ff6b00] dark:text-orange-400 tracking-tight uppercase">
+                        {getLocalizedPlanName(tenant.plan, language)}
+                      </h2>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          {language === 'pt' ? 'Pacote Ativo' : 'Active Package'}
+                        </span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800">
+                          {tenant.tenant?.subscription?.billingFrequency === 'annual'
+                            ? (language === 'pt' ? 'Faturação Anual' : 'Annual Billing')
+                            : (language === 'pt' ? 'Faturação Mensal' : 'Monthly Billing')}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
+                      {getLocalizedPlanDescription(tenant.plan, language)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  <Link
+                    to={`${adminBase}/billing`}
+                    className="px-5 py-2.5 rounded-xl text-sm font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap active:scale-95"
+                  >
+                    <CreditCard size={16} />
+                    <span>{language === 'pt' ? 'Mudar / Fazer Upgrade' : 'Change / Upgrade'}</span>
+                  </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPlansModal(true)}
+                    className="px-5 py-2.5 rounded-xl text-sm font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 shadow-sm transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap active:scale-95"
+                  >
+                    <Eye size={16} />
+                    <span>{language === 'pt' ? 'Ver Planos' : 'See Plans'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Usage Limits Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
+                {/* 1. Monthly Bookings */}
+                <div className="p-5 rounded-2xl bg-gray-100/60 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex flex-col justify-between gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                        <Calendar size={18} />
+                      </div>
+                      <span className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                        {language === 'pt' ? 'Reservas Mensais' : 'Monthly Bookings'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-black text-gray-900 dark:text-white">
+                      {bookingUsage?.used ?? 0} / {formatResourceAllowance(tenant.entitlements, 'bookings', language)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {/* Progress Bar */}
+                    <div className="w-full bg-gray-200 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-700 ease-out",
+                          (bookingUsage?.percentUsed ?? 0) >= 100
+                            ? "bg-red-500"
+                            : (bookingUsage?.percentUsed ?? 0) >= 80
+                            ? "bg-amber-500"
+                            : "bg-emerald-500"
+                        )}
+                        style={{ width: `${Math.min(100, bookingUsage?.percentUsed ?? 0)}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-tight">
+                      <span>
+                        {bookingUsage?.remaining !== null
+                          ? language === 'pt'
+                            ? `${bookingUsage?.remaining} restantes`
+                            : `${bookingUsage?.remaining} remaining`
+                          : language === 'pt' ? 'Ilimitado' : 'Unlimited'}
+                      </span>
+                      {bookingUsage?.periodStart && (
+                        <span className="text-gray-400">
+                          {bookingUsage.periodStart} – {bookingUsage.periodEnd}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Staff Accounts */}
+                <div className="p-5 rounded-2xl bg-gray-100/60 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex flex-col justify-between gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                        <Users size={18} />
+                      </div>
+                      <span className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                        {language === 'pt' ? 'Contas de Staff' : 'Staff Accounts'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-black text-gray-900 dark:text-white">
+                      {activeStaffCount ?? users.length} / {formatResourceAllowance(tenant.entitlements, 'staff', language)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="w-full bg-gray-200 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-700 ease-out",
+                          staffLimitCheck && !staffLimitCheck.allowed ? "bg-amber-500" : "bg-blue-500"
+                        )}
+                        style={{
+                          width: staffLimitCheck?.limit
+                            ? `${Math.min(100, Math.round(((activeStaffCount ?? users.length) / staffLimitCheck.limit) * 100))}%`
+                            : '10%'
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-tight">
+                      <span>
+                        {staffLimitCheck?.remaining !== null
+                          ? language === 'pt'
+                            ? `${staffLimitCheck?.remaining} vagas`
+                            : `${staffLimitCheck?.remaining} slots`
+                          : language === 'pt' ? 'Ilimitado' : 'Unlimited'}
+                      </span>
+                      <Link to={`${adminBase}/users`} className="text-amber-600 hover:text-amber-700 underline underline-offset-2">
+                        {language === 'pt' ? 'Gerir' : 'Manage'}
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Dining Tables */}
+                <div className="p-5 rounded-2xl bg-gray-100/60 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex flex-col justify-between gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        <MdTableRestaurant size={18} />
+                      </div>
+                      <span className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                        {language === 'pt' ? 'Mesas de Sala' : 'Dining Tables'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-black text-gray-900 dark:text-white">
+                      {tables.length} / {formatResourceAllowance(tenant.entitlements, 'tables', language)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="w-full bg-gray-200 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-700 ease-out",
+                          tableLimitCheck && !tableLimitCheck.allowed ? "bg-amber-500" : "bg-emerald-500"
+                        )}
+                        style={{
+                          width: tableLimitCheck?.limit
+                            ? `${Math.min(100, Math.round((tables.length / tableLimitCheck.limit) * 100))}%`
+                            : '10%'
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-tight">
+                      <span>
+                        {tableLimitCheck?.remaining !== null
+                          ? language === 'pt'
+                            ? `${tableLimitCheck?.remaining} disponíveis`
+                            : `${tableLimitCheck?.remaining} available`
+                          : language === 'pt' ? 'Ilimitado' : 'Unlimited'}
+                      </span>
+                      <Link to={`${adminBase}/tables`} className="text-amber-600 hover:text-amber-700 underline underline-offset-2">
+                        {language === 'pt' ? 'Planta' : 'Floor Plan'}
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Package Core Features Row */}
+              <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-800/80 flex flex-wrap items-center gap-3 text-xs">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mr-2">
+                  {language === 'pt' ? 'Recursos Incluídos:' : 'Included Features:'}
+                </span>
+                {[
+                  { key: 'smartAlerts', en: 'Smart Alerts', pt: 'Alertas Inteligentes' },
+                  { key: 'customDomain', en: 'Custom Domain', pt: 'Domínio Próprio' },
+                  { key: 'whatsapp', en: 'WhatsApp', pt: 'WhatsApp' },
+                  { key: 'sms', en: 'SMS', pt: 'SMS' },
+                  { key: 'advancedSEO', en: 'Advanced SEO', pt: 'SEO Avançado' },
+                  { key: 'waitlist', en: 'Waitlist', pt: 'Lista de Espera' },
+                  { key: 'advancedAnalytics', en: 'Advanced Analytics', pt: 'Análises Avançadas' },
+                  { key: 'apiAccess', en: 'API Webhooks', pt: 'API REST & Webhooks' },
+                ].map((feat) => {
+                  const enabled = isPackageFeatureEnabled(tenant.entitlements, feat.key as any);
+                  return (
+                    <span
+                      key={feat.key}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tight border shadow-xs transition-all",
+                        enabled
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                          : "bg-gray-50 dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-800 opacity-60"
+                      )}
+                    >
+                      {enabled ? <Check size={12} strokeWidth={3} /> : <X size={12} strokeWidth={3} />}
+                      <span>{language === 'pt' ? feat.pt : feat.en}</span>
+                      <span className="font-semibold text-[9px] opacity-80">
+                        ({enabled ? (language === 'pt' ? 'Incluído' : 'Included') : (language === 'pt' ? 'Não incluído' : 'Not included')})
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+      )}
+    </div>
+
         </>
       )}
       {editingRes && (
@@ -2668,31 +3024,35 @@ const FloorPlanFilterDropdown: React.FC<{
                     <option value="no-show">{t('res.no-show')}</option>
                     <option value="cancelled">{t('res.cancelled')}</option>
                     <option value="completed">{t('res.completed')}</option>
-                    <option value="waiting-list">{t('res.waiting-list')}</option>
+                    {(waitlistEnabled || editingRes.status === 'waiting-list') && (
+                      <option value="waiting-list">{t('res.waiting-list')}</option>
+                    )}
                   </select>
                   </div>
 
                 <div className="flex flex-row items-center gap-6 pb-2">
-                  <div className="flex items-center gap-3">
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer"
-                      checked={editingRes.isWaitlist || false}
-                      onChange={(e) => {
-                        const isChecked = e.target.checked;
-                        setEditingRes({ 
-                          ...editingRes, 
-                          isWaitlist: isChecked,
-                          status: isChecked ? 'waiting-list' : (editingRes.status === 'waiting-list' ? 'booked' : editingRes.status),
-                          tableId: isChecked ? "" : editingRes.tableId
-                        });
-                      }}
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
-                  </label>
-                  <span className="text-sm font-bold">{t('res.waitlist') || "Waitlist"}</span>
-                  </div>
+                  {waitlistEnabled && (
+                    <div className="flex items-center gap-3">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer"
+                          checked={editingRes.isWaitlist || false}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setEditingRes({ 
+                              ...editingRes, 
+                              isWaitlist: isChecked,
+                              status: isChecked ? 'waiting-list' : (editingRes.status === 'waiting-list' ? 'booked' : editingRes.status),
+                              tableId: isChecked ? "" : editingRes.tableId
+                            });
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                      </label>
+                      <span className="text-sm font-bold">{t('res.waitlist') || "Waitlist"}</span>
+                    </div>
+                  )}
 
                 <div className="flex items-center gap-3">
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -2853,6 +3213,133 @@ const FloorPlanFilterDropdown: React.FC<{
                 {language === 'pt' ? 'Cancelar' : 'Cancel'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* See Plans Modal */}
+      {showPlansModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
+          <div 
+            className={cn(
+              "relative w-full max-w-[1240px] rounded-3xl shadow-2xl border my-4 sm:my-8 p-5 sm:p-8 max-h-[92vh] overflow-y-auto",
+              settings?.theme === 'dark' ? "bg-gray-950 border-gray-800 text-white" : "bg-white border-gray-100 text-gray-900"
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-6 border-b border-gray-100 dark:border-gray-800 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
+                  <Sparkles size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
+                    {language === 'pt' ? 'Planos de Subscrição' : 'Subscription Plans'}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {language === 'pt'
+                      ? 'Compare planos disponíveis e selecione o melhor para o seu restaurante.'
+                      : 'Compare available plans and choose the ideal package for your restaurant.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlansModal(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <PlanComparisonSection
+              currentSubscription={
+                (tenant?.tenant?.subscription || {
+                  restaurantId: currentSlug,
+                  planId: tenant?.plan?.id || 'professional',
+                  planName: tenant?.plan?.name || 'Professional',
+                  billingFrequency: tenant?.tenant?.subscription?.billingFrequency || 'monthly',
+                  status: 'active',
+                  priceMonthly: tenant?.plan?.priceMonthly || 49,
+                }) as any
+              }
+              onSelectPlan={handleSelectPlan}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Change Plan Confirmation Modal */}
+      <ChangePlanModal
+        isOpen={isChangePlanModalOpen}
+        onClose={() => setIsChangePlanModalOpen(false)}
+        targetPlan={selectedPlanForChange}
+        targetFrequency={targetFrequency}
+        currentSubscription={
+          (tenant?.tenant?.subscription || {
+            restaurantId: currentSlug,
+            planId: tenant?.plan?.id || 'professional',
+            planName: tenant?.plan?.name || 'Professional',
+            billingFrequency: tenant?.tenant?.subscription?.billingFrequency || 'monthly',
+            status: 'active',
+            priceMonthly: tenant?.plan?.priceMonthly || 49,
+          }) as any
+        }
+        onConfirm={handleConfirmPlanChange}
+        isLoading={isChangePlanLoading}
+      />
+
+      {/* Assistance Request Modal */}
+      {isAssistanceModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative text-left">
+            <button
+              onClick={() => setIsAssistanceModalOpen(false)}
+              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+            <h3 className="text-lg font-bold text-white mb-2">Request Assistance</h3>
+            <p className="text-xs text-slate-400 mb-4">Briefly describe the issue you need help with.</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!assistanceDescription.trim()) return;
+              setIsSubmittingAssistance(true);
+              try {
+                // We need tenant data, hope it's available in AdminDashboard
+                // I need to use the `tenant` object which is available via useTenantSafe
+                await createAssistanceRequest({
+                  restaurantId: tenant?.id || 'unknown',
+                  restaurantName: tenant?.name || 'Unknown Restaurant',
+                  userId: user?.id || 'unknown',
+                  userEmail: user?.email || 'unknown',
+                  userName: user?.name || 'Unknown User',
+                  description: assistanceDescription.trim(),
+                });
+                toast.success('Assistance request submitted successfully!');
+                setIsAssistanceModalOpen(false);
+                setAssistanceDescription('');
+              } catch (err: any) {
+                toast.error(err?.message || 'Failed to submit assistance request.');
+              } finally {
+                setIsSubmittingAssistance(false);
+              }
+            }} className="space-y-4">
+              <textarea
+                rows={4}
+                required
+                value={assistanceDescription}
+                onChange={(e) => setAssistanceDescription(e.target.value)}
+                placeholder="Describe the issue..."
+                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+              />
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setIsAssistanceModalOpen(false)} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl">Cancel</button>
+                <button type="submit" disabled={isSubmittingAssistance} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md">
+                  {isSubmittingAssistance ? 'Submitting...' : 'Submit Request'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

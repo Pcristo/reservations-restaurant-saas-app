@@ -20,6 +20,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../hooks/useSettings';
 import { useLanguage } from '../hooks/useLanguage';
 import { useTenantSafe } from '../hooks/useTenant';
+import { useReservations } from '../hooks/useReservations';
+import { useTables } from '../hooks/useTables';
+import { useUsers } from '../hooks/useUsers';
 import { cn } from '../lib/utils';
 import { 
   BillingOverviewSummary, 
@@ -55,6 +58,9 @@ export default function AdminBilling() {
   const currentSlug = rawSlug.toLowerCase() === 'bella-italia' ? 'bela-italia' : rawSlug;
   const { settings } = useSettings(currentSlug);
   const { t, language } = useLanguage();
+  const { bookingUsage } = useReservations({ includeAll: true });
+  const { tables } = useTables();
+  const { activeStaffCount } = useUsers();
   const adminBase = `/r/${currentSlug}/admin`;
 
   // Active Tab state
@@ -395,6 +401,9 @@ export default function AdminBilling() {
                 <SubscriptionDetailsCard
                   subscription={overview.subscription}
                   plan={overview.currentPlan}
+                  bookingUsage={bookingUsage}
+                  activeStaffCount={activeStaffCount}
+                  activeTablesCount={tables.length}
                   onUpgradeClick={() => setActiveTab('membership')}
                   onCancelClick={() => setIsCancelModalOpen(true)}
                   onReactivateClick={handleReactivate}
@@ -416,6 +425,9 @@ export default function AdminBilling() {
                 <SubscriptionDetailsCard
                   subscription={overview.subscription}
                   plan={overview.currentPlan}
+                  bookingUsage={bookingUsage}
+                  activeStaffCount={activeStaffCount}
+                  activeTablesCount={tables.length}
                   onUpgradeClick={() => {}}
                   onCancelClick={() => setIsCancelModalOpen(true)}
                   onReactivateClick={handleReactivate}

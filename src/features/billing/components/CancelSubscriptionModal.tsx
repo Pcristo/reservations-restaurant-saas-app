@@ -6,6 +6,7 @@ import {
   ShieldAlert 
 } from 'lucide-react';
 import { RestaurantSubscription } from '../../../types';
+import { getLocalizedPlanName } from '../../../services/entitlementsService';
 import { useLanguage } from '../../../hooks/useLanguage';
 
 interface CancelSubscriptionModalProps {
@@ -87,8 +88,8 @@ export const CancelSubscriptionModal: React.FC<CancelSubscriptionModalProps> = (
             <ul className="list-disc pl-4 space-y-1 text-amber-800/90 dark:text-amber-200">
               <li>
                 {language === 'pt'
-                  ? `O seu plano ${subscription.planName} permanece 100% ativo até ${formatDate(subscription.currentPeriodEnd)}.`
-                  : `Your ${subscription.planName} plan remains 100% active until ${formatDate(subscription.currentPeriodEnd)}.`}
+                  ? `O seu plano ${getLocalizedPlanName({ id: subscription.planId, name: subscription.planName }, language)} permanece 100% ativo até ${formatDate(subscription.currentPeriodEnd)}.`
+                  : `Your ${getLocalizedPlanName({ id: subscription.planId, name: subscription.planName }, language)} plan remains 100% active until ${formatDate(subscription.currentPeriodEnd)}.`}
               </li>
               <li>
                 {language === 'pt'
@@ -113,12 +114,12 @@ export const CancelSubscriptionModal: React.FC<CancelSubscriptionModalProps> = (
               onChange={(e) => setReason(e.target.value)}
               className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             >
-              <option value="switching_provider">Switching to another reservation system</option>
-              <option value="cost_pricing">Price / Cost considerations</option>
-              <option value="closing_business">Restaurant is closing or pausing operations</option>
-              <option value="missing_features">Missing required features</option>
-              <option value="temporary">Seasonal closure / temporary pause</option>
-              <option value="other">Other reason</option>
+              <option value="switching_provider">{language === 'pt' ? 'Mudança para outro sistema de reservas' : 'Switching to another reservation system'}</option>
+              <option value="cost_pricing">{language === 'pt' ? 'Considerações de preço / custo' : 'Price / Cost considerations'}</option>
+              <option value="closing_business">{language === 'pt' ? 'Restaurante vai encerrar ou pausar operações' : 'Restaurant is closing or pausing operations'}</option>
+              <option value="missing_features">{language === 'pt' ? 'Faltam funcionalidades necessárias' : 'Missing required features'}</option>
+              <option value="temporary">{language === 'pt' ? 'Encerramento sazonal / pausa temporária' : 'Seasonal closure / temporary pause'}</option>
+              <option value="other">{language === 'pt' ? 'Outro motivo' : 'Other reason'}</option>
             </select>
           </div>
 
@@ -130,7 +131,7 @@ export const CancelSubscriptionModal: React.FC<CancelSubscriptionModalProps> = (
             <textarea
               value={customNotes}
               onChange={(e) => setCustomNotes(e.target.value)}
-              placeholder="Tell us what we could have done better..."
+              placeholder={language === 'pt' ? 'Diga-nos como poderíamos melhorar...' : 'Tell us what we could have done better...'}
               rows={2}
               className="w-full text-xs p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             />

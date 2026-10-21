@@ -1,22 +1,26 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc 
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Plan, User } from '../types';
 import { DEFAULT_PLANS } from '../data/plans';
 import { logAuditAction } from './tenantService';
 import { APP_CONFIG } from '../data/appConfig';
+import {
+  normalizePlan,
+  validatePlanConfiguration,
+} from './entitlementsService';
 
 const PLANS_COLLECTION = 'plans';
 
 /**
- * Lists all SaaS subscription plans from Firestore.
+ * Lists all SaaS subscription plans from Firestore (central source of truth).
  * If the collection is empty, seeds the initial DEFAULT_PLANS into Firestore.
  */
 export async function listAllPlans(): Promise<Plan[]> {
@@ -25,20 +29,22 @@ export async function listAllPlans(): Promise<Plan[]> {
     const snap = await getDocs(coll);
 
     if (snap.empty) {
-      // Seed default plans into Firestore so they can be managed and edited
       const seededPlans: Plan[] = [];
       for (const p of DEFAULT_PLANS) {
-        const planWithFlags: Plan = {
-          ...p,
-          isActive: p.isActive !== false,
-          isPublic: p.isPublic !== false,
-        };
+        const normalized = normalizePlan(
+          {
+            ...p,
+            isActive: p.isActive !== false,
+            isPublic: p.isPublic !== false,
+          },
+          p.id
+        );
         try {
-          await setDoc(doc(db, PLANS_COLLECTION, p.id), planWithFlags);
+          await setDoc(doc(db, PLANS_COLLECTION, normalized.id), normalized);
         } catch (e) {
-          console.warn('[planService] Notice seeding default plan:', p.id, e);
+          console.warn('[planService] Notice seeding default plan:', normalized.id, e);
         }
-        seededPlans.push(planWithFlags);
+        seededPlans.push(normalized);
       }
       return seededPlans.sort((a, b) => a.priceMonthly - b.priceMonthly);
     }
@@ -46,90 +52,109 @@ export async function listAllPlans(): Promise<Plan[]> {
     const plans: Plan[] = [];
     snap.forEach((d) => {
       const data = d.data() as Partial<Plan>;
-      plans.push({
-        id: d.id,
-        name: data.name || d.id,
-        description: data.description || '',
-        priceMonthly: Number(data.priceMonthly ?? 0),
-        currency: data.currency || 'EUR',
-        isPopular: Boolean(data.isPopular),
-        isActive: data.isActive !== false,
-        isPublic: data.isPublic !== false,
-        entitlements: {
-          maxStaffUsers: Number(data.entitlements?.maxStaffUsers ?? 5),
-          maxTables: Number(data.entitlements?.maxTables ?? 25),
-          maxReservations: Number(data.entitlements?.maxReservations ?? 500),
-          customDomain: Boolean(data.entitlements?.customDomain),
-          advancedAnalytics: Boolean(data.entitlements?.advancedAnalytics),
-          whatsapp: Boolean(data.entitlements?.whatsapp),
-          sms: Boolean(data.entitlements?.sms),
-          advancedSEO: Boolean(data.entitlements?.advancedSEO),
-          waitlist: Boolean(data.entitlements?.waitlist),
-          apiAccess: Boolean(data.entitlements?.apiAccess),
-          ...(data.entitlements || {}),
-        },
-        customFeatures: Array.isArray(data.customFeatures) ? data.customFeatures : [],
-      });
+      plans.push(normalizePlan(data, d.id));
     });
 
     return plans.sort((a, b) => a.priceMonthly - b.priceMonthly);
   } catch (err) {
     console.error('[planService] Error listing plans from Firestore:', err);
-    // Fallback to in-memory DEFAULT_PLANS with visibility defaults
-    return DEFAULT_PLANS.map(p => ({
-      ...p,
-      isActive: p.isActive !== false,
-      isPublic: p.isPublic !== false,
-      customFeatures: Array.isArray(p.customFeatures) ? p.customFeatures : [],
-    }));
+    return DEFAULT_PLANS.map((p) => normalizePlan(p, p.id)).sort(
+      (a, b) => a.priceMonthly - b.priceMonthly
+    );
   }
 }
 
 /**
- * Creates or updates a SaaS Plan with its full entitlements and visibility flags.
+ * Subscribes in real time to all SaaS subscription packages in Firestore.
+ * Ensures Super Admin edits propagate immediately to public pricing and restaurant dashboards.
+ */
+export function subscribeToPlans(onUpdate: (plans: Plan[]) => void): () => void {
+  try {
+    const coll = collection(db, PLANS_COLLECTION);
+    const unsubscribe = onSnapshot(
+      coll,
+      (snap) => {
+        if (snap.empty) {
+          onUpdate(
+            DEFAULT_PLANS.map((p) => normalizePlan(p, p.id)).sort(
+              (a, b) => a.priceMonthly - b.priceMonthly
+            )
+          );
+          return;
+        }
+        const loaded: Plan[] = [];
+        snap.forEach((d) => {
+          loaded.push(normalizePlan(d.data() as Partial<Plan>, d.id));
+        });
+        loaded.sort((a, b) => a.priceMonthly - b.priceMonthly);
+        onUpdate(loaded);
+      },
+      (err) => {
+        console.warn('[planService] Real-time plans listener fallback:', err);
+        onUpdate(
+          DEFAULT_PLANS.map((p) => normalizePlan(p, p.id)).sort(
+            (a, b) => a.priceMonthly - b.priceMonthly
+          )
+        );
+      }
+    );
+    return unsubscribe;
+  } catch {
+    onUpdate(
+      DEFAULT_PLANS.map((p) => normalizePlan(p, p.id)).sort(
+        (a, b) => a.priceMonthly - b.priceMonthly
+      )
+    );
+    return () => {};
+  }
+}
+
+/**
+ * Validates and saves a SaaS Plan with its full entitlements, usage limit controls, and visibility flags.
  */
 export async function savePlan(plan: Plan, actor?: User | null): Promise<Plan> {
-  const planId = plan.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const planId = (plan.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
   if (!planId) {
     throw new Error('Plan ID must not be empty.');
   }
 
-  const cleanPlan: Plan = {
-    ...plan,
-    id: planId,
-    name: plan.name.trim(),
-    description: plan.description.trim(),
-    priceMonthly: Math.max(0, Number(plan.priceMonthly)),
-    currency: plan.currency || 'EUR',
-    isPopular: Boolean(plan.isPopular),
-    isActive: plan.isActive !== false,
-    isPublic: plan.isPublic !== false,
-    entitlements: {
-      maxStaffUsers: Number(plan.entitlements.maxStaffUsers),
-      maxTables: Number(plan.entitlements.maxTables),
-      maxReservations: Number(plan.entitlements.maxReservations),
-      customDomain: Boolean(plan.entitlements.customDomain),
-      advancedAnalytics: Boolean(plan.entitlements.advancedAnalytics),
-      whatsapp: Boolean(plan.entitlements.whatsapp),
-      sms: Boolean(plan.entitlements.sms),
-      advancedSEO: Boolean(plan.entitlements.advancedSEO),
-      waitlist: Boolean(plan.entitlements.waitlist),
-      apiAccess: Boolean(plan.entitlements.apiAccess),
-      ...(plan.entitlements || {}),
+  const validation = validatePlanConfiguration({ ...plan, id: planId });
+  if (!validation.valid) {
+    throw new Error(validation.errors[0] || 'Invalid package configuration.');
+  }
+
+  const cleanPlan: Plan = normalizePlan(
+    {
+      ...plan,
+      id: planId,
+      name: plan.name.trim(),
+      description: (plan.description || '').trim(),
+      priceMonthly: Math.max(0, Number(plan.priceMonthly)),
+      priceAnnual:
+        typeof plan.priceAnnual === 'number' && !Number.isNaN(plan.priceAnnual)
+          ? Math.max(0, Number(plan.priceAnnual))
+          : Math.round(Math.max(0, Number(plan.priceMonthly)) * 12 * 0.8),
+      currency: plan.currency || 'EUR',
+      isPopular: Boolean(plan.isPopular),
+      isActive: plan.isActive !== false,
+      isPublic: plan.isPublic !== false,
+      customFeatures: (plan.customFeatures || [])
+        .map((f) => ({
+          id:
+            f.id ||
+            `feat-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+          title: f.title?.trim() || '',
+          description: f.description?.trim() || '',
+          enabled: f.enabled !== false,
+        }))
+        .filter((f) => Boolean(f.title)),
+      updatedAt: new Date().toISOString(),
     },
-    customFeatures: (plan.customFeatures || []).map(f => ({
-      id: f.id || `feat-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
-      title: f.title?.trim() || '',
-      description: f.description?.trim() || '',
-      enabled: f.enabled !== false,
-    })).filter(f => Boolean(f.title)),
-  };
+    planId
+  );
 
   const planRef = doc(db, PLANS_COLLECTION, planId);
-  await setDoc(planRef, {
-    ...cleanPlan,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  await setDoc(planRef, cleanPlan, { merge: true });
 
   await logAuditAction({
     restaurantId: 'platform',
@@ -142,7 +167,9 @@ export async function savePlan(plan: Plan, actor?: User | null): Promise<Plan> {
     details: {
       planName: cleanPlan.name,
       priceMonthly: cleanPlan.priceMonthly,
+      priceAnnual: cleanPlan.priceAnnual,
       isVisible: cleanPlan.isPublic && cleanPlan.isActive,
+      entitlements: cleanPlan.entitlements,
     },
     result: 'success',
   });
@@ -154,8 +181,8 @@ export async function savePlan(plan: Plan, actor?: User | null): Promise<Plan> {
  * Toggles whether a plan is displayed or hidden on the marketing website & registration.
  */
 export async function togglePlanVisibility(
-  planId: string, 
-  isVisible: boolean, 
+  planId: string,
+  isVisible: boolean,
   actor?: User | null
 ): Promise<void> {
   const planRef = doc(db, PLANS_COLLECTION, planId);
@@ -203,15 +230,16 @@ export async function deletePlan(planId: string, actor?: User | null): Promise<v
  */
 export async function resetPlansToDefault(actor?: User | null): Promise<Plan[]> {
   for (const p of DEFAULT_PLANS) {
-    const planWithFlags: Plan = {
-      ...p,
-      isActive: true,
-      isPublic: true,
-    };
-    await setDoc(doc(db, PLANS_COLLECTION, p.id), {
-      ...planWithFlags,
-      updatedAt: new Date().toISOString(),
-    });
+    const normalized = normalizePlan(
+      {
+        ...p,
+        isActive: true,
+        isPublic: true,
+        updatedAt: new Date().toISOString(),
+      },
+      p.id
+    );
+    await setDoc(doc(db, PLANS_COLLECTION, normalized.id), normalized);
   }
 
   await logAuditAction({

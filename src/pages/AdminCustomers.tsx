@@ -61,24 +61,14 @@ export default function AdminCustomers() {
   const [registeredUsers, setRegisteredUsers] = useState<Record<string, { id?: string; email: string; status: string; createdAt?: any }>>({});
 
   const tenant = useTenantSafe();
-  const targetRestaurantId = tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
   const currentSlug = slug || tenant?.slug || user?.restaurantId || (user?.restaurantIds && user.restaurantIds[0]);
+  const targetRestaurantId = currentSlug || tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
   const adminBase = currentSlug ? `/r/${currentSlug}/admin` : '/admin';
 
   useEffect(() => {
     if (authLoading || (!isStaff && !isAdmin)) return;
     
-    let q;
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    
-    // We cannot use useAuth().isSuperAdmin easily inside this effect without adding it as dependency, but we can try to filter it
-    // Wait, the hook useUsers is better, but here it's manually querying. Let's just filter by restaurantId unless they are super admin.
-    // Actually, we can just use query with restaurantId. If they are global staff they might get errors, but they should really just be using useUsers.
-    if (isDefault) {
-      q = collection(db, 'users');
-    } else {
-      q = query(collection(db, 'users'), where('restaurantId', '==', targetRestaurantId));
-    }
+    const q = query(collection(db, 'users'), where('restaurantId', '==', targetRestaurantId));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersMap: Record<string, { id?: string; email: string; status: string; createdAt?: any }> = {};
@@ -979,17 +969,21 @@ export default function AdminCustomers() {
                               onClick={async () => {
                                 try {
                                   const newStatus = regInfo.status === 'active' ? 'inactive' : 'active';
-                                  // Handle legacy users collection entries
                                   if (regInfo.email) {
-                                    const q = query(collection(db, 'users'), where('email', '==', regInfo.email.toLowerCase()));
+                                    const q = query(
+                                      collection(db, 'users'),
+                                      where('restaurantId', '==', targetRestaurantId),
+                                      where('email', '==', regInfo.email.toLowerCase())
+                                    );
                                     const snap = await getDocs(q);
-                                    const updatePromises = snap.docs.map(d => updateDoc(doc(db, 'users', d.id), { status: newStatus }));
+                                    const updatePromises = snap.docs
+                                      .filter(d => d.data().role === 'customer')
+                                      .map(d => updateDoc(doc(db, 'users', d.id), { status: newStatus }));
                                     await Promise.all(updatePromises);
-                                  } else {
-                                    await updateDoc(doc(db, 'users', regInfo.id), { status: newStatus });
+                                  } else if (regInfo.id) {
+                                    await updateDoc(doc(db, 'users', regInfo.id), { status: newStatus }).catch(() => {});
                                   }
                                   
-                                  // Update the customer record itself (since new customers don't have a users entry)
                                   await updateCustomer(editingCustomer.id, { status: newStatus });
                                   toast.success(
                                     language === 'pt' 
@@ -1018,32 +1012,22 @@ export default function AdminCustomers() {
                               onClick={async () => {
                                 if (window.confirm(language === 'pt' ? 'Tem a certeza que deseja eliminar a conta deste utilizador? O cliente permanecerá na lista de clientes, mas não poderá fazer login.' : 'Are you sure you want to delete this user account? The customer will remain in the customers list but will not be able to log in.')) {
                                   try {
-                                    // Handle legacy users collection entries
                                     if (regInfo.email) {
-                                      const q = query(collection(db, 'users'), where('email', '==', regInfo.email.toLowerCase()));
+                                      const q = query(
+                                        collection(db, 'users'),
+                                        where('restaurantId', '==', targetRestaurantId),
+                                        where('email', '==', regInfo.email.toLowerCase())
+                                      );
                                       const snap = await getDocs(q);
-                                      const deletePromises = snap.docs.map(d => deleteDoc(doc(db, 'users', d.id)));
+                                      const deletePromises = snap.docs
+                                        .filter(d => d.data().role === 'customer')
+                                        .map(d => deleteDoc(doc(db, 'users', d.id)));
                                       await Promise.all(deletePromises);
-                                    } else {
-                                      await deleteDoc(doc(db, 'users', regInfo.id));
+                                    } else if (regInfo.id) {
+                                      await deleteDoc(doc(db, 'users', regInfo.id)).catch(() => {});
                                     }
                                     
-                                    // Handle Firebase Auth deletion for customer
-                                    let authUid = editingCustomer.authUid;
-                                    if (authUid) {
-                                      try {
-                                        const res = await fetch('/api/admin/delete-user', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ uid: authUid })
-                                        });
-                                        if (!res.ok) console.error('Failed to delete auth user');
-                                      } catch (e) {
-                                        console.error('Error calling delete API:', e);
-                                      }
-                                    }
-                                    
-                                    // Mark customer as unregistered
+                                    // Mark customer as unregistered in this restaurant
                                     await updateCustomer(editingCustomer.id, { isRegistered: false, authUid: null });
                                     
                                     toast.success(language === 'pt' ? 'Conta eliminada com sucesso.' : 'Account deleted successfully.');

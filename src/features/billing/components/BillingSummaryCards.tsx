@@ -10,6 +10,7 @@ import {
   Zap
 } from 'lucide-react';
 import { BillingOverviewSummary } from '../../../types';
+import { getLocalizedPlanName } from '../../../services/entitlementsService';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../hooks/useLanguage';
 
@@ -110,7 +111,7 @@ export const BillingSummaryCards: React.FC<BillingSummaryCardsProps> = ({
         <div>
           <div className="flex items-baseline gap-2">
             <h3 className="text-xl font-extrabold text-gray-900 dark:text-white truncate">
-              {plan?.name || sub?.planName || 'Professional'}
+              {getLocalizedPlanName(plan || { id: sub?.planId, name: sub?.planName || 'Professional' }, language)}
             </h3>
             {sub.cancelAtPeriodEnd && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">

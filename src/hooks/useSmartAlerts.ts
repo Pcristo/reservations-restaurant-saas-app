@@ -2,13 +2,14 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, onSnapshot, query, where, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { format, parse } from 'date-fns';
-import { Reservation, Table, Area, DEFAULT_RESTAURANT_ID } from '../types';
+import { Reservation, DEFAULT_RESTAURANT_ID } from '../types';
 import { useAuth } from './useAuth';
 import { useTenantSafe } from './useTenant';
 import { useSettings } from './useSettings';
 import { useLanguage } from './useLanguage';
 import { useTables } from './useTables';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { doesUserBelongToRestaurant, isUserSuperAdmin, normalizeTenantIdentifier } from '../lib/permissions';
 
 export interface SmartAlert {
   id: string;
@@ -32,22 +33,73 @@ export interface SmartAlert {
 
 export function useSmartAlerts() {
   const [firestoreAlerts, setFirestoreAlerts] = useState<SmartAlert[]>([]);
-  const { tables, areas } = useTables();
+  const { tables } = useTables();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
-  const { isStaff, isAdmin, loading: authLoading } = useAuth();
+  const { user, isStaff, isAdmin, loading: authLoading } = useAuth();
   const tenant = useTenantSafe();
-  const targetRestaurantId = tenant?.targetRestaurantId || DEFAULT_RESTAURANT_ID;
+
+  const routeSlugMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/) : null;
+  const activeRouteSlug = routeSlugMatch && routeSlugMatch[1] ? normalizeTenantIdentifier(routeSlugMatch[1]) : null;
+
+  const targetRestaurantId = useMemo(() => {
+    if (activeRouteSlug) {
+      if (tenant?.tenant && normalizeTenantIdentifier(tenant.tenant.slug) === activeRouteSlug) {
+        return normalizeTenantIdentifier(tenant.tenant.id);
+      }
+      return activeRouteSlug;
+    }
+    if (tenant?.targetRestaurantId) {
+      return normalizeTenantIdentifier(tenant.targetRestaurantId);
+    }
+    if (user && !isUserSuperAdmin(user)) {
+      const userRest = user.restaurantId || (user.restaurantIds && user.restaurantIds[0]);
+      if (userRest) return normalizeTenantIdentifier(userRest);
+    }
+    return DEFAULT_RESTAURANT_ID;
+  }, [activeRouteSlug, tenant?.tenant, tenant?.targetRestaurantId, user]);
+
+  const isAuthorizedForCurrentRestaurant = useMemo(() => {
+    if (!user || (!isStaff && !isAdmin)) return false;
+    if (isUserSuperAdmin(user)) return true;
+    return doesUserBelongToRestaurant(user, targetRestaurantId, tenant?.tenant);
+  }, [user, isStaff, isAdmin, targetRestaurantId, tenant?.tenant]);
+
+  const isDefaultTenant = useMemo(() => {
+    const norm = normalizeTenantIdentifier(targetRestaurantId);
+    return (norm === 'main' || norm === 'default-restaurant' || norm === 'dinemaster-bistro') &&
+      (!activeRouteSlug || activeRouteSlug === 'main' || activeRouteSlug === 'default-restaurant' || activeRouteSlug === 'dinemaster-bistro');
+  }, [targetRestaurantId, activeRouteSlug]);
+
+  const matchesTenant = useCallback((itemRestId?: string | null) => {
+    const normI = normalizeTenantIdentifier(itemRestId);
+    const normT = normalizeTenantIdentifier(targetRestaurantId);
+    if (!normI) return isDefaultTenant;
+    if (normI === normT) return true;
+    if (activeRouteSlug && normI === activeRouteSlug) return true;
+    if (tenant?.tenant) {
+      if (normI === normalizeTenantIdentifier(tenant.tenant.id) || normI === normalizeTenantIdentifier(tenant.tenant.slug)) {
+        return true;
+      }
+    }
+    if (isDefaultTenant && (normI === 'main' || normI === 'default-restaurant' || normI === 'dinemaster-bistro')) {
+      return true;
+    }
+    return false;
+  }, [targetRestaurantId, activeRouteSlug, tenant?.tenant, isDefaultTenant]);
+
   const { settings } = useSettings();
   const { language } = useLanguage();
 
   // Fetch reservations from today onwards for memory alert computation (scoped to restaurant)
   useEffect(() => {
-    if (authLoading || (!isStaff && !isAdmin)) return;
+    if (authLoading || !isAuthorizedForCurrentRestaurant) {
+      if (!authLoading) setReservations([]);
+      return;
+    }
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
     let q;
-    if (isDefault) {
+    if (isDefaultTenant) {
       q = query(
         collection(db, 'reservations'),
         where('date', '>=', todayStr)
@@ -62,27 +114,21 @@ export function useSmartAlerts() {
 
     const unsubRes = onSnapshot(q, (snapshot) => {
       const filtered = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
-        .filter(r => {
-          if (isDefault) {
-            return !r.restaurantId || r.restaurantId === DEFAULT_RESTAURANT_ID || r.restaurantId === 'main';
-          }
-          return r.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Reservation))
+        .filter(r => matchesTenant(r.restaurantId));
       setReservations(filtered);
     }, (err) => {
       console.warn("Reservations listener for alerts notice:", err);
     });
     return () => unsubRes();
-  }, [isStaff, isAdmin, authLoading, targetRestaurantId]);
+  }, [authLoading, isAuthorizedForCurrentRestaurant, isDefaultTenant, targetRestaurantId, matchesTenant]);
 
   // 1. Fetch persistent smart alerts from Firestore (scoped to restaurant)
   useEffect(() => {
-    if (authLoading || (!isStaff && !isAdmin)) {
-      if (!authLoading) {
-        setFirestoreAlerts([]);
-        setLoading(false);
-      }
+    if (authLoading) return;
+    if (!isAuthorizedForCurrentRestaurant) {
+      setFirestoreAlerts([]);
+      setLoading(false);
       return;
     }
 
@@ -91,21 +137,15 @@ export function useSmartAlerts() {
     }, 1200);
 
     const alertsRef = collection(db, `smart_alerts`);
-    const isDefault = targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main';
-    const q = isDefault
+    const q = isDefaultTenant
       ? query(alertsRef)
       : query(alertsRef, where('restaurantId', '==', targetRestaurantId));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       clearTimeout(safetyTimer);
       const fetchedAlerts = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as SmartAlert))
-        .filter(a => {
-          if (isDefault) {
-            return !a.restaurantId || a.restaurantId === DEFAULT_RESTAURANT_ID || a.restaurantId === 'main';
-          }
-          return a.restaurantId === targetRestaurantId;
-        });
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as SmartAlert))
+        .filter(a => matchesTenant(a.restaurantId));
       setFirestoreAlerts(fetchedAlerts);
       setLoading(false);
     }, (error) => {
@@ -118,11 +158,11 @@ export function useSmartAlerts() {
       clearTimeout(safetyTimer);
       unsubscribe();
     };
-  }, [isStaff, isAdmin, authLoading, targetRestaurantId]);
+  }, [authLoading, isAuthorizedForCurrentRestaurant, isDefaultTenant, targetRestaurantId, matchesTenant]);
 
   // 2. Compute dynamic smart alerts entirely in memory (0 Firestore write loops)
   const dynamicAlerts = useMemo(() => {
-    if (!isStaff && !isAdmin) return [];
+    if (!isAuthorizedForCurrentRestaurant) return [];
 
     const computedAlerts: SmartAlert[] = [];
 
@@ -375,7 +415,7 @@ export function useSmartAlerts() {
     }
 
     return computedAlerts;
-  }, [isStaff, isAdmin, reservations, tables, settings, language]);
+  }, [isAuthorizedForCurrentRestaurant, reservations, tables, settings, language]);
 
   // Combine Firestore persistent/custom alerts with dynamic alerts and apply statuses
   const allAlerts = useMemo(() => {
@@ -387,7 +427,6 @@ export function useSmartAlerts() {
     const combined: SmartAlert[] = [];
     const addedFingerprints = new Set<string>();
 
-    // 1. Dynamic alerts with overrides from Firestore
     dynamicAlerts.forEach(dynAlert => {
       const key = dynAlert.fingerprint || dynAlert.id;
       addedFingerprints.add(key);
@@ -407,7 +446,6 @@ export function useSmartAlerts() {
       }
     });
 
-    // 2. Custom or standalone Firestore alerts
     firestoreAlerts.forEach(fsAlert => {
       const key = fsAlert.fingerprint || fsAlert.id;
       if (!addedFingerprints.has(key)) {
@@ -419,7 +457,7 @@ export function useSmartAlerts() {
   }, [dynamicAlerts, firestoreAlerts]);
 
   const deleteAlert = useCallback(async (alertId: string) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
@@ -428,10 +466,10 @@ export function useSmartAlerts() {
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, `smart_alerts/${alertId}`);
     }
-  }, [targetRestaurantId]);
+  }, [targetRestaurantId, isAuthorizedForCurrentRestaurant]);
 
   const dismissAlert = useCallback(async (alertId: string) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
@@ -451,10 +489,10 @@ export function useSmartAlerts() {
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `smart_alerts/${alertId}`);
     }
-  }, [targetRestaurantId]);
+  }, [targetRestaurantId, isAuthorizedForCurrentRestaurant]);
 
   const resolveAlert = useCallback(async (alertId: string) => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
@@ -474,7 +512,7 @@ export function useSmartAlerts() {
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `smart_alerts/${alertId}`);
     }
-  }, [targetRestaurantId]);
+  }, [targetRestaurantId, isAuthorizedForCurrentRestaurant]);
 
   const activeAlerts = useMemo(() => {
     return allAlerts

@@ -4,7 +4,7 @@ import { PlatformSettings } from '../../types';
 import { 
   Settings, Save, Globe, Mail, Shield, Server, Check, 
   Lock, Unlock, Eye, EyeOff, Copy, Key, Smartphone, MapPin, Loader2, Sparkles,
-  Send, RefreshCw, AlertCircle, CheckCircle2
+  Send, RefreshCw, AlertCircle, CheckCircle2, Scale, Building2, ExternalLink, FileText
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { db } from '../../firebase';
@@ -657,6 +657,214 @@ export const SuperAdminSettings: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Platform Legal & Corporate Entity Details (Single Source of Truth) */}
+        <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Scale className="w-4 h-4 text-amber-500" />
+              <span>Platform Legal & Corporate Entity Details</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium flex items-center gap-1">
+                <Building2 size={11} />
+                <span>Legal Pages Source of Truth</span>
+              </span>
+            </div>
+          </div>
+
+          <p className="text-slate-400 text-xs leading-relaxed">
+            These details serve as the single source of truth dynamically displayed on the Platform Terms &amp; Conditions (<code className="text-amber-400 font-mono">/terms</code>), Privacy Policy (<code className="text-amber-400 font-mono">/privacy</code>), and Cookie Policy (<code className="text-amber-400 font-mono">/cookies</code>). Values entered here are kept strictly separated from individual restaurant tenant data.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Legal Corporate / Business Name <span className="text-amber-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={settings.legalCompanyName || ''}
+                onChange={(e) => setSettings({ ...settings, legalCompanyName: e.target.value })}
+                placeholder="e.g. DineMaster Pro Technologies Limited"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Registered statutory company name (Ireland / Portugal / EU entity).
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Company Registration Number (CRN / NIPC) <span className="text-amber-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={settings.companyRegistrationNumber || ''}
+                onChange={(e) => setSettings({ ...settings, companyRegistrationNumber: e.target.value })}
+                placeholder="e.g. 712345 (CRO Ireland) or 512345678 (NIPC Portugal)"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Official commercial registry or companies registration office number.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                VAT / Tax Identification Number <span className="text-amber-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={settings.vatNumber || ''}
+                onChange={(e) => setSettings({ ...settings, vatNumber: e.target.value })}
+                placeholder="e.g. IE 3812345AB or PT 501234567"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                EU VAT identification number for electronic services &amp; invoicing.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Registered Corporate Office Address <span className="text-amber-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={settings.registeredAddress || ''}
+                onChange={(e) => setSettings({ ...settings, registeredAddress: e.target.value })}
+                placeholder="e.g. 10 Grand Canal Dock, Dublin 2, D02 X224, Ireland"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Official statutory registered office for legal service of notices.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Legal &amp; Privacy Contact Email
+              </label>
+              <input
+                type="email"
+                value={settings.legalContactEmail || ''}
+                onChange={(e) => setSettings({ ...settings, legalContactEmail: e.target.value })}
+                placeholder={settings.supportEmail || "legal@dinemasterpro.com"}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Dedicated email for GDPR data subject requests and legal notices.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Corporate Telephone
+              </label>
+              <input
+                type="tel"
+                value={settings.contactPhone || ''}
+                onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })}
+                placeholder="+353 1 555 0100 or +351 21 000 0000"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Official telephone contact for platform inquiries.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Data Protection Officer (DPO) / Representative Email
+              </label>
+              <input
+                type="email"
+                value={settings.dpoContactEmail || ''}
+                onChange={(e) => setSettings({ ...settings, dpoContactEmail: e.target.value })}
+                placeholder="dpo@dinemasterpro.com"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Optional appointed DPO or designated EU privacy representative.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Primary Operating Jurisdictions
+              </label>
+              <select
+                value={settings.primaryJurisdiction || 'both'}
+                onChange={(e) => setSettings({ ...settings, primaryJurisdiction: e.target.value as any })}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white"
+              >
+                <option value="both">Ireland &amp; Portugal (European Union)</option>
+                <option value="ireland">Ireland (DPA 2018 / Irish DPC)</option>
+                <option value="portugal">Portugal (Lei n.º 58/2019 / CNPD)</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Governing law and primary statutory data protection framework.
+              </p>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-slate-300 font-medium mb-1">
+                Online Dispute Resolution / Alternative Dispute Entity
+              </label>
+              <input
+                type="url"
+                value={settings.disputeResolutionPlatform || 'https://ec.europa.eu/consumers/odr'}
+                onChange={(e) => setSettings({ ...settings, disputeResolutionPlatform: e.target.value })}
+                placeholder="https://ec.europa.eu/consumers/odr"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                European Commission Online Dispute Resolution (ODR) platform link pursuant to Regulation (EU) No 524/2013.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Links Preview Box */}
+          <div className="p-3.5 bg-slate-900/60 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-slate-300">
+              <FileText size={14} className="text-amber-400" />
+              <span className="font-medium">Live Platform Legal Pages:</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <a 
+                href="/terms" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 font-medium inline-flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <span>Terms &amp; Conditions</span>
+                <ExternalLink size={11} />
+              </a>
+              <span className="text-slate-700">·</span>
+              <a 
+                href="/privacy" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 font-medium inline-flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <span>Privacy Policy</span>
+                <ExternalLink size={11} />
+              </a>
+              <span className="text-slate-700">·</span>
+              <a 
+                href="/cookies" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 font-medium inline-flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <span>Cookie Policy</span>
+                <ExternalLink size={11} />
+              </a>
+            </div>
+          </div>
+        </div>
+
 
         {/* Domain Routing Targets */}
         <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4">

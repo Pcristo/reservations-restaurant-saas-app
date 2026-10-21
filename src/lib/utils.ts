@@ -649,4 +649,28 @@ export function isTenantSubdomain(host: string): boolean {
   return false;
 }
 
+/**
+     * Extracts tenant slug from subdomain if applicable
+     */
+export function getTenantSubdomainSlug(host: string): string | null {
+  if (!host) return null;
+  const h = host.toLowerCase().trim();
+  if (h.endsWith('.workers.dev') || h.endsWith('.pages.dev')) return null;
+  const platformName = APP_CONFIG.companyName.toLowerCase();
+  const canonicalBases = [`${platformName}.com`, 'dinemasterpro.com', 'eataapp.com'];
+  for (const base of canonicalBases) {
+    if (h.endsWith(`.${base}`)) {
+      const parts = h.split('.');
+      if (parts.length >= 3) {
+        const sub = parts[0];
+        const reserved = ['www', 'app', 'admin', 'portal', 'api', 'dev', 'staging', 'mail', 'preview', 'status'];
+        if (!reserved.includes(sub)) {
+          return sub;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 

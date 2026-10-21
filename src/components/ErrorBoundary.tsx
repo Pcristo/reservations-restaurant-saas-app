@@ -16,6 +16,31 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error) {
+    // Check if it's a chunk load error
+    const isChunkError = error.message && (
+      error.message.includes('Loading chunk') ||
+      error.message.includes('Failed to fetch dynamically imported module') ||
+      error.message.includes('Importing a module script failed')
+    );
+
+    if (isChunkError) {
+      // Automatically clear cache and reload on chunk error
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+        if (window.indexedDB && window.indexedDB.databases) {
+          window.indexedDB.databases().then(dbs => {
+            dbs.forEach(db => {
+              if (db.name) window.indexedDB.deleteDatabase(db.name);
+            });
+          });
+        }
+      } catch (e) {
+        console.warn('Cache clear error:', e);
+      }
+      window.location.reload();
+    }
+
     return { hasError: true, error };
   }
 
@@ -27,15 +52,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-          <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-red-100">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+          <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-amber-100">
+            <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Something went wrong</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Restoring Application...</h1>
             <p className="text-gray-600 mb-6">
-              The application encountered an unexpected error. Please try refreshing the page.
+              We detected a temporary loading issue or cached state mismatch. Click below to refresh and clear cache.
             </p>
             {this.state.error && (
               <pre className="text-left bg-gray-50 p-4 rounded-lg text-xs text-gray-500 overflow-auto mb-6 max-h-40">
@@ -45,9 +70,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => window.location.reload()}
-                className="w-full bg-amber-600 text-white py-3 rounded-xl font-bold hover:bg-amber-700 transition-colors shadow-lg shadow-amber-200"
+                className="w-full bg-amber-600 text-white py-3 rounded-xl font-bold hover:bg-amber-700 transition-colors shadow-lg shadow-amber-200 cursor-pointer"
               >
-                Refresh Page
+                Reload Page
               </button>
               <button
                 onClick={async () => {
@@ -65,7 +90,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
                   }
                   window.location.reload();
                 }}
-                className="w-full bg-white text-gray-700 border border-gray-200 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition-colors text-sm"
+                className="w-full bg-white text-gray-700 border border-gray-200 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition-colors text-sm cursor-pointer"
               >
                 Clear Local Cache & Reload
               </button>
@@ -78,3 +103,4 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return this.props.children;
   }
 }
+

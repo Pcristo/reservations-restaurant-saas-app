@@ -131,6 +131,57 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    // Self-cleaning Service Worker response in dev mode so any previously registered
+    // production Service Worker updates cleanly, clears caches, and unregisters itself
+    app.get(['/sw.js', '/registerSW.js', '/workbox-:hash.js'], (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.send(`
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((names) => Promise.all(names.map((name) => caches.delete(name))))
+      .then(() => self.registration.unregister())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => {
+        clients.forEach((client) => {
+          if ('navigate' in client) {
+            client.navigate(client.url);
+          }
+        });
+      })
+  );
+});
+`);
+    });
+
+    // If a stale Service Worker serves a cached dist/index.html that requests hashed /assets/*.js,
+    // serve from dist/assets if available or return a self-healing script instead of SPA HTML fallback
+    const distAssetsPath = path.join(process.cwd(), 'dist', 'assets');
+    app.use('/assets', express.static(distAssetsPath, { fallthrough: true }));
+    app.get('/assets/*.js', (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(`
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    Promise.all(regs.map((r) => r.unregister())).then(() => {
+      if ('caches' in window) {
+        caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(() => {
+          window.location.reload();
+        });
+      } else {
+        window.location.reload();
+      }
+    });
+  });
+}
+`);
+    });
+
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

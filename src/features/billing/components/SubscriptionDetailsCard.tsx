@@ -1,24 +1,32 @@
 import React from 'react';
-import { 
-  Users, 
-  MapPin, 
-  Calendar, 
-  Globe, 
-  Check, 
-  X, 
-  AlertTriangle, 
+import {
+  Users,
+  Calendar,
+  Globe,
+  Check,
+  X,
+  AlertTriangle,
   RotateCcw,
   Sparkles,
-  ArrowRight
 } from 'lucide-react';
 import { MdTableRestaurant } from 'react-icons/md';
 import { RestaurantSubscription, Plan } from '../../../types';
+import {
+  formatResourceAllowance,
+  getLocalizedPlanName,
+  getLocalizedPlanDescription,
+  isPackageFeatureEnabled,
+  MonthlyBookingUsageSummary,
+} from '../../../services/entitlementsService';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../hooks/useLanguage';
 
 interface SubscriptionDetailsCardProps {
   subscription: RestaurantSubscription;
   plan: Plan;
+  bookingUsage?: MonthlyBookingUsageSummary;
+  activeStaffCount?: number;
+  activeTablesCount?: number;
   onUpgradeClick: () => void;
   onCancelClick: () => void;
   onReactivateClick?: () => void;
@@ -28,6 +36,9 @@ interface SubscriptionDetailsCardProps {
 export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = ({
   subscription,
   plan,
+  bookingUsage,
+  activeStaffCount,
+  activeTablesCount,
   onUpgradeClick,
   onCancelClick,
   onReactivateClick,
@@ -61,9 +72,10 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
     customDomain: true,
     whatsapp: true,
     sms: true,
+    advancedSEO: true,
+    waitlist: true,
     advancedAnalytics: true,
     apiAccess: false,
-    waitlist: true,
   };
 
   return (
@@ -72,14 +84,23 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-              {plan?.name || subscription?.planName}
+              {getLocalizedPlanName(plan || { id: subscription?.planId, name: subscription?.planName }, language)}
             </h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              {subscription.billingFrequency === 'annual' ? (language === 'pt' ? 'Faturação Anual' : 'Annual Billing') : (language === 'pt' ? 'Faturação Mensal' : 'Monthly Billing')}
+              {subscription.billingFrequency === 'annual'
+                ? language === 'pt'
+                  ? 'Faturação Anual'
+                  : 'Annual Billing'
+                : language === 'pt'
+                ? 'Faturação Mensal'
+                : 'Monthly Billing'}
             </span>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
-            {plan?.description || 'Full table reservations suite, real-time live floor plan sync, and customer management.'}
+            {getLocalizedPlanDescription(plan, language) ||
+              (language === 'pt'
+                ? 'Gestão completa de reservas, sincronização da planta em tempo real e gestão de clientes.'
+                : 'Full table reservations suite, real-time live floor plan sync, and customer management.')}
           </p>
         </div>
 
@@ -91,8 +112,10 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
                 disabled={isReactivating}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <RotateCcw size={14} className={isReactivating ? "animate-spin" : ""} />
-                <span>{language === 'pt' ? 'Reativar Subscrição' : 'Reactivate Subscription'}</span>
+                <RotateCcw size={14} className={isReactivating ? 'animate-spin' : ''} />
+                <span>
+                  {language === 'pt' ? 'Reativar Subscrição' : 'Reactivate Subscription'}
+                </span>
               </button>
             )
           ) : (
@@ -102,7 +125,9 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
               >
                 <Sparkles size={14} />
-                <span>{language === 'pt' ? 'Mudar Plano / Ciclo' : 'Change Plan / Billing'}</span>
+                <span>
+                  {language === 'pt' ? 'Mudar Plano / Ciclo' : 'Change Plan / Billing'}
+                </span>
               </button>
 
               <button
@@ -119,7 +144,10 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
       {/* Cancellation Warning Banner if active */}
       {subscription.cancelAtPeriodEnd && (
         <div className="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 flex items-start gap-3">
-          <AlertTriangle size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <AlertTriangle
+            size={18}
+            className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+          />
           <div className="text-xs space-y-1">
             <p className="font-bold">
               {language === 'pt' ? 'Cancelamento Agendado' : 'Scheduled Cancellation'}
@@ -140,9 +168,19 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
             {language === 'pt' ? 'Preço Vigente' : 'Current Price'}
           </span>
           <span className="text-sm font-extrabold text-gray-900 dark:text-white mt-1 block">
-            {formatCurrency(subscription.currentPrice || plan?.priceMonthly || 0, subscription.currency)}
+            {formatCurrency(
+              subscription.currentPrice || plan?.priceMonthly || 0,
+              subscription.currency
+            )}
             <span className="text-[11px] font-normal text-gray-500">
-              /{subscription.billingFrequency === 'annual' ? (language === 'pt' ? 'ano' : 'yr') : (language === 'pt' ? 'mês' : 'mo')}
+              /
+              {subscription.billingFrequency === 'annual'
+                ? language === 'pt'
+                  ? 'ano'
+                  : 'yr'
+                : language === 'pt'
+                ? 'mês'
+                : 'mo'}
             </span>
           </span>
         </div>
@@ -152,7 +190,8 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
             {language === 'pt' ? 'Período Atual' : 'Billing Period'}
           </span>
           <span className="text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-            {formatDate(subscription.currentPeriodStart)} – {formatDate(subscription.currentPeriodEnd)}
+            {formatDate(subscription.currentPeriodStart)} –{' '}
+            {formatDate(subscription.currentPeriodEnd)}
           </span>
         </div>
 
@@ -161,8 +200,10 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
             {language === 'pt' ? 'Data de Renovação' : 'Next Renewal'}
           </span>
           <span className="text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-            {subscription.cancelAtPeriodEnd 
-              ? (language === 'pt' ? 'Não renova' : 'Will not renew') 
+            {subscription.cancelAtPeriodEnd
+              ? language === 'pt'
+                ? 'Não renova'
+                : 'Will not renew'
               : formatDate(subscription.nextBillingDate || subscription.currentPeriodEnd)}
           </span>
         </div>
@@ -177,111 +218,151 @@ export const SubscriptionDetailsCard: React.FC<SubscriptionDetailsCardProps> = (
         </div>
       </div>
 
-      {/* Included Limits & Entitlements */}
+      {/* Included Limits & Live Usage */}
       <div className="pt-6">
         <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-4">
-          {language === 'pt' ? 'Limites & Recursos Incluídos no Plano' : 'Included Plan Limits & Features'}
+          {language === 'pt'
+            ? 'Limites, Utilização & Recursos Incluídos no Pacote'
+            : 'Package Allowance, Usage & Feature Entitlements'}
         </h4>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
-              <Users size={16} />
-            </div>
-            <div>
-              <span className="text-[10px] text-gray-400 font-semibold uppercase block">
-                {language === 'pt' ? 'Utilizadores Staff' : 'Staff Accounts'}
-              </span>
-              <span className="text-sm font-extrabold text-gray-900 dark:text-white">
-                {ent.maxStaffUsers >= 999 ? 'Unlimited' : ent.maxStaffUsers}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-              <MdTableRestaurant size={16} />
-            </div>
-            <div>
-              <span className="text-[10px] text-gray-400 font-semibold uppercase block">
-                {language === 'pt' ? 'Mesas Ativas' : 'Active Tables'}
-              </span>
-              <span className="text-sm font-extrabold text-gray-900 dark:text-white">
-                {ent.maxTables >= 999 ? 'Unlimited' : ent.maxTables}
-              </span>
-            </div>
-          </div>
-
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Monthly Bookings Usage & Allowance */}
           <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
             <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
               <Calendar size={16} />
             </div>
             <div>
               <span className="text-[10px] text-gray-400 font-semibold uppercase block">
-                {language === 'pt' ? 'Reservas / Mês' : 'Bookings / Mo'}
+                {language === 'pt' ? 'Reservas Mensais' : 'Monthly Bookings'}
               </span>
-              <span className="text-sm font-extrabold text-gray-900 dark:text-white">
-                {ent.maxReservations >= 99999 ? 'Unlimited' : ent.maxReservations.toLocaleString()}
+              <span className="text-sm font-extrabold text-gray-900 dark:text-white block">
+                {bookingUsage
+                  ? `${bookingUsage.used} / ${formatResourceAllowance(ent, 'bookings', language)}`
+                  : formatResourceAllowance(ent, 'bookings', language)}
+              </span>
+              {bookingUsage && bookingUsage.remaining !== null && (
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 block">
+                  {language === 'pt'
+                    ? `${bookingUsage.remaining} restantes no período`
+                    : `${bookingUsage.remaining} remaining this period`}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Staff Accounts Usage & Allowance */}
+          <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+              <Users size={16} />
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-400 font-semibold uppercase block">
+                {language === 'pt' ? 'Contas de Staff' : 'Staff Accounts'}
+              </span>
+              <span className="text-sm font-extrabold text-gray-900 dark:text-white block">
+                {typeof activeStaffCount === 'number'
+                  ? `${activeStaffCount} / ${formatResourceAllowance(ent, 'staff', language)}`
+                  : formatResourceAllowance(ent, 'staff', language)}
               </span>
             </div>
           </div>
 
+          {/* Dining Tables Usage & Allowance */}
+          <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <MdTableRestaurant size={16} />
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-400 font-semibold uppercase block">
+                {language === 'pt' ? 'Mesas de Refeição' : 'Dining Tables'}
+              </span>
+              <span className="text-sm font-extrabold text-gray-900 dark:text-white block">
+                {typeof activeTablesCount === 'number'
+                  ? `${activeTablesCount} / ${formatResourceAllowance(ent, 'tables', language)}`
+                  : formatResourceAllowance(ent, 'tables', language)}
+              </span>
+            </div>
+          </div>
+
+          {/* Custom Subdomain/Domain */}
           <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 flex items-center gap-3">
             <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
               <Globe size={16} />
             </div>
             <div>
               <span className="text-[10px] text-gray-400 font-semibold uppercase block">
-                {language === 'pt' ? 'Domínio Próprio' : 'Custom Domain'}
+                {language === 'pt' ? 'Domínio / Subdomínio' : 'Custom Subdomain/Domain'}
               </span>
-              <span className="text-sm font-extrabold text-gray-900 dark:text-white">
-                {ent.customDomain ? (language === 'pt' ? 'Incluído' : 'Included') : '—'}
+              <span className="text-sm font-extrabold text-gray-900 dark:text-white block">
+                {ent.customDomain
+                  ? language === 'pt'
+                    ? 'Incluído'
+                    : 'Included'
+                  : language === 'pt'
+                  ? 'Não incluído'
+                  : 'Not Included'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Feature Badges list */}
+        {/* Feature Entitlement Badges */}
         <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          <span className={cn(
-            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border",
-            ent.whatsapp ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent"
-          )}>
-            {ent.whatsapp ? <Check size={12} /> : <X size={12} />}
-            WhatsApp Notifications
-          </span>
-
-          <span className={cn(
-            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border",
-            ent.sms ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent"
-          )}>
-            {ent.sms ? <Check size={12} /> : <X size={12} />}
-            SMS Gateway
-          </span>
-
-          <span className={cn(
-            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border",
-            ent.advancedAnalytics ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent"
-          )}>
-            {ent.advancedAnalytics ? <Check size={12} /> : <X size={12} />}
-            Advanced Analytics
-          </span>
-
-          <span className={cn(
-            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border",
-            ent.waitlist ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent"
-          )}>
-            {ent.waitlist ? <Check size={12} /> : <X size={12} />}
-            Live Waitlist
-          </span>
-
-          <span className={cn(
-            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border",
-            ent.apiAccess ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent"
-          )}>
-            {ent.apiAccess ? <Check size={12} /> : <X size={12} />}
-            API Webhooks & Integrations
-          </span>
+          {[
+            {
+              enabled: ent.customDomain,
+              label:
+                language === 'pt'
+                  ? 'Domínio / Subdomínio Próprio'
+                  : 'Custom Subdomain/Domain',
+            },
+            {
+              enabled: ent.whatsapp,
+              label: language === 'pt' ? 'Ações WhatsApp' : 'WhatsApp Action',
+            },
+            {
+              enabled: ent.sms,
+              label: language === 'pt' ? 'Lembretes SMS' : 'SMS Reminders',
+            },
+            {
+              enabled: ent.advancedSEO,
+              label: language === 'pt' ? 'SEO Avançado' : 'Advanced SEO',
+            },
+            {
+              enabled: ent.waitlist,
+              label:
+                language === 'pt' ? 'Gestão de Lista de Espera' : 'Waitlist Management',
+            },
+            {
+              enabled: ent.advancedAnalytics,
+              label: language === 'pt' ? 'Análises Avançadas' : 'Advanced Analytics',
+            },
+            {
+              enabled: isPackageFeatureEnabled(ent, 'smartAlerts'),
+              label: language === 'pt' ? 'Alertas Inteligentes' : 'Smart Alerts',
+            },
+            {
+              enabled: ent.apiAccess,
+              label:
+                language === 'pt'
+                  ? 'API REST & Webhooks'
+                  : 'API Webhooks & Integrations',
+            },
+          ].map((feat, idx) => (
+            <span
+              key={idx}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold border',
+                feat.enabled
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent'
+              )}
+            >
+              {feat.enabled ? <Check size={12} /> : <X size={12} />}
+              {feat.label}
+            </span>
+          ))}
         </div>
       </div>
     </div>

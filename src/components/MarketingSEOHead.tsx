@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { MarketingWebsiteSettings, Plan } from '../types';
 import { updateFavicon } from '../lib/utils';
 import { useLanguage } from '../hooks/useLanguage';
+import { useFeatureFlags } from '../services/featureFlagsService';
 
 interface MarketingSEOHeadProps {
   settings: MarketingWebsiteSettings;
@@ -10,6 +11,8 @@ interface MarketingSEOHeadProps {
 
 export const MarketingSEOHead: React.FC<MarketingSEOHeadProps> = ({ settings, plans = [] }) => {
   const { language } = useLanguage();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const advancedSeoEnabled = isFeatureEnabled('advanced_seo');
   const isPt = language === 'pt';
 
   useEffect(() => {
@@ -24,6 +27,12 @@ export const MarketingSEOHead: React.FC<MarketingSEOHeadProps> = ({ settings, pl
 
     // 1. Page Title
     document.title = pageTitle;
+
+    if (!advancedSeoEnabled) {
+      const existingScript = document.getElementById('marketing-jsonld-schema');
+      if (existingScript) existingScript.remove();
+      return;
+    }
 
     // Helper to set or create meta tags
     const setMetaTag = (nameAttr: 'name' | 'property', attrValue: string, content: string) => {
@@ -145,7 +154,7 @@ export const MarketingSEOHead: React.FC<MarketingSEOHeadProps> = ({ settings, pl
       const existingScript = document.getElementById('marketing-jsonld-schema');
       if (existingScript) existingScript.remove();
     };
-  }, [settings, plans]);
+  }, [settings, plans, isPt, advancedSeoEnabled]);
 
   return null;
 };
