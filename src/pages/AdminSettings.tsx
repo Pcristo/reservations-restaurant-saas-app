@@ -807,6 +807,34 @@ export default function AdminSettings() {
 
       {activeTab === 'media' && !showBin && !showDataHistory && (
         <div className="space-y-6">
+          <div className={cn(
+            "flex items-center justify-between p-4 rounded-xl border transition-colors duration-300",
+            settings?.theme === 'dark' ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+          )}>
+            <div>
+              <h3 className={cn(
+                "text-sm font-bold",
+                settings?.theme === 'dark' ? "text-slate-200" : "text-slate-800"
+              )}>
+                {language === 'pt' ? 'Mostrar Galeria no Booking' : 'Show Gallery in Booking'}
+              </h3>
+              <p className={cn(
+                "text-[11px]",
+                settings?.theme === 'dark' ? "text-slate-400" : "text-slate-500"
+              )}>
+                {language === 'pt' ? 'Apresentar imagens da galeria na página de reservas online' : 'Display gallery images on the online booking page'}
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={formData.showGalleryInBooking ?? false} 
+                onChange={(e) => setFormData({ ...formData, showGalleryInBooking: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 dark:bg-gray-800"></div>
+            </label>
+          </div>
           <RestaurantGalleryManager
             images={formData.galleryImages || []}
             onChange={(newImages) => {

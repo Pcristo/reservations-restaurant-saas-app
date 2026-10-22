@@ -25,6 +25,8 @@ export interface RestaurantGalleryManagerProps {
   customSettings?: any;
 }
 
+import { useLanguage } from '../../hooks/useLanguage';
+
 export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> = ({
   images = [],
   onChange,
@@ -33,6 +35,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
   theme = 'light',
   customSettings,
 }) => {
+  const { language } = useLanguage();
   const isDark = theme === 'dark';
   const [isUploading, setIsUploading] = useState(false);
   const [isAddingUrl, setIsAddingUrl] = useState(false);
@@ -138,16 +141,16 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
           <div className="flex items-center gap-2">
             <ImageIcon className="w-5 h-5 text-amber-500" />
             <h3 className={cn("text-base font-bold", isDark ? "text-white" : "text-gray-900")}>
-              Restaurant Photo Gallery & Media
+              {language === 'pt' ? 'Galeria de Fotos do Restaurante e Multimédia' : 'Restaurant Photo Gallery & Media'}
             </h3>
             {images.length > 0 && (
               <span className="text-xs bg-amber-500/10 text-amber-500 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-semibold">
-                {images.length} {images.length === 1 ? 'Photo' : 'Photos'}
+                {images.length} {images.length === 1 ? (language === 'pt' ? 'Foto' : 'Photo') : (language === 'pt' ? 'Fotos' : 'Photos')}
               </span>
             )}
           </div>
           <p className={cn("text-xs mt-1", isDark ? "text-gray-400" : "text-gray-500")}>
-            Upload photos of dining rooms, dishes, and ambience. Images uploaded to Cloudinary are automatically organized under <span className="font-mono text-amber-500 font-semibold">{targetFolder}</span>.
+            {language === 'pt' ? 'Carregue fotos de salas de jantar, pratos e ambiente. As imagens carregadas no Cloudinary são organizadas automaticamente em' : 'Upload photos of dining rooms, dishes, and ambience. Images uploaded to Cloudinary are automatically organized under'} <span className="font-mono text-amber-500 font-semibold">{targetFolder}</span>.
           </p>
         </div>
 
@@ -167,7 +170,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             )}
           >
             <Plus size={13} />
-            <span>Add via URL</span>
+            <span>{language === 'pt' ? 'Adicionar via URL' : 'Add via URL'}</span>
           </button>
 
           {/* Hidden File Input */}
@@ -196,12 +199,12 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             {isUploading ? (
               <>
                 <Loader2 size={13} className="animate-spin text-slate-950" />
-                <span>Uploading...</span>
+                <span>{language === 'pt' ? 'A carregar...' : 'Uploading...'}</span>
               </>
             ) : (
               <>
                 <Cloud size={13} className="text-slate-950" />
-                <span>Upload to Cloudinary</span>
+                <span>{language === 'pt' ? 'Carregar para Cloudinary' : 'Upload to Cloudinary'}</span>
               </>
             )}
           </button>
@@ -217,21 +220,21 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5 uppercase tracking-wider">
               <Plus size={13} />
-              Add Image from URL
+              {language === 'pt' ? 'Adicionar Imagem via URL' : 'Add Image from URL'}
             </span>
             <button
               type="button"
               onClick={() => setIsAddingUrl(false)}
               className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
             >
-              Cancel
+              {language === 'pt' ? 'Cancelar' : 'Cancel'}
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                Image URL *
+                {language === 'pt' ? 'URL da Imagem *' : 'Image URL *'}
               </label>
               <input
                 type="url"
@@ -248,7 +251,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
 
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                Caption / Description (Optional)
+                {language === 'pt' ? 'Legenda / Descrição (Opcional)' : 'Caption / Description (Optional)'}
               </label>
               <input
                 type="text"
@@ -268,7 +271,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
               type="submit"
               className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors cursor-pointer"
             >
-              Add to Gallery
+              {language === 'pt' ? 'Adicionar à Galeria' : 'Add to Gallery'}
             </button>
           </div>
         </form>
@@ -311,6 +314,20 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
                   />
+
+                  {/* Visibility Checkbox */}
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-1 rounded backdrop-blur-sm">
+                    <input
+                      type="checkbox"
+                      checked={img.isVisible ?? true}
+                      onChange={(e) => {
+                        const updated = images.map(i => i.id === img.id ? { ...i, isVisible: e.target.checked } : i);
+                        onChange(updated);
+                      }}
+                      className="w-3.5 h-3.5 rounded border-gray-600 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <span className="text-[10px] text-white">{language === 'pt' ? 'Mostrar no Booking' : 'Show in Booking'}</span>
+                  </div>
 
                   {/* Cloudinary Badge overlay */}
                   <div className="absolute top-2 left-2">

@@ -8,7 +8,7 @@ import { getOptimizedUrl, cn, isPlatformHost, isTenantSubdomain } from '../lib/u
 import { APP_CONFIG } from '../data/appConfig';
 import { MarketingWebsiteSettings } from '../types';
 import { getMarketingWebsiteSettings, DEFAULT_MARKETING_SETTINGS } from '../services/marketingWebsiteService';
-import zarcoLogo1 from '../assets/developer/zarco_logo_1_no_bg.png';
+
 
 interface PreloaderProps {
   isPlatform?: boolean;
@@ -141,12 +141,9 @@ const Preloader: React.FC<PreloaderProps> = ({
               </div>
             ) : (
               <div 
-                className="w-[110px] h-[110px] rounded-2xl flex items-center justify-center text-slate-950 font-black text-5xl shadow-lg shadow-amber-500/20"
-                style={{
-                  background: 'linear-gradient(to top right, #f59e0b, #fbbf24, #fcd34d)'
-                }}
+                className="w-[110px] h-[110px] rounded-2xl flex items-center justify-center text-slate-950 font-black text-5xl shadow-lg shadow-amber-500/20 bg-white"
               >
-                <Utensils size={44} className="text-slate-950" />
+                <img src="/logo.png" alt="DineMaster Logo" className="w-20 h-20 object-contain" />
               </div>
             )
           ) : (
@@ -208,13 +205,7 @@ const Preloader: React.FC<PreloaderProps> = ({
           "flex items-center justify-center gap-1.5 text-[12px] font-medium scale-[1.08]",
           isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
         )}>
-          <span>{language === 'pt' ? 'Desenvolvido por' : 'Developed by'}</span>
-          <img 
-            src={zarcoLogo1} 
-            alt="Zarco" 
-            className="h-[23px] sm:h-[25.3px] w-auto object-contain opacity-85 scale-[1.15] origin-left inline-block"
-            referrerPolicy="no-referrer"
-          />
+          <span>{language === 'pt' ? 'Desenvolvido por DineMaster' : 'Developed by DineMaster'}</span>
         </div>
       </motion.div>
     </motion.div>

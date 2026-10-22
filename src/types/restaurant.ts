@@ -27,6 +27,7 @@ export interface RestaurantGalleryImage {
   folder?: string;
   cloudinaryPublicId?: string;
   createdAt?: string;
+  isVisible?: boolean;
 }
 
 export interface SpecialSchedule {
@@ -238,6 +239,7 @@ export interface RestaurantSettings {
   supportAccessUpdatedAt?: string;
   supportAccessUpdatedBy?: string;
   activeSupportSessionId?: string | null;
+  showGalleryInBooking?: boolean;
 }
 
 export interface CustomerManagementSettings {

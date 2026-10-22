@@ -24,14 +24,24 @@ import {
   Calendar,
   XCircle,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { listAllRestaurants } from '../../services/tenantService';
 import { listAllPlans } from '../../services/planService';
-import { Restaurant, Plan } from '../../types';
+import { Restaurant, Plan, PaymentTransaction } from '../../types';
 import { cn } from '../../lib/utils';
-import { downloadInvoicePdf } from '../../services/billingService';
+import { 
+  downloadInvoicePdf, 
+  deleteInvoice, 
+  deleteTransaction, 
+  listTransactions,
+  sendReminder,
+  markInvoicePaid
+} from '../../services/billingService';
+import { updateRestaurant } from '../../services/tenantService';
+import { savePlan } from '../../services/planService';
 
 const formatCurrency = (amount: number, curr = 'EUR') => {
   return `€${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -42,10 +52,70 @@ export const SuperAdminBilling: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateRangeFilter, setDateRangeFilter] = useState<string>('30days');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [editingSub, setEditingSub] = useState<Restaurant | null>(null);
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [newPlanName, setNewPlanName] = useState('');
+  const [newPlanPrice, setNewPlanPrice] = useState(0);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [deletingRecord, setDeletingRecord] = useState<{ type: 'invoice' | 'transaction', id: string } | null>(null);
+  const [newPlanId, setNewPlanId] = useState('');
+  const [newStatus, setNewStatus] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (editingSub) {
+      setNewPlanId(editingSub.planId || '');
+      setNewStatus(editingSub.status || 'active');
+    }
+    if (editingPlan) {
+      setNewPlanName(editingPlan.name || '');
+      setNewPlanPrice(editingPlan.priceMonthly || 0);
+    }
+  }, [editingSub, editingPlan]);
+
+  const handleSavePlan = async () => {
+    if (!editingPlan) return;
+    setIsSavingPlan(true);
+    try {
+      const savedPlan = await savePlan({ ...editingPlan, name: newPlanName, priceMonthly: newPlanPrice });
+      toast.success('Plan updated successfully');
+      
+      const affectedRestaurants = restaurants.filter(r => r.planId === savedPlan.id);
+      for (const r of affectedRestaurants) {
+        if (r.planName !== savedPlan.name) {
+          await updateRestaurant(r.id, { planName: savedPlan.name });
+        }
+      }
+      
+      loadBillingData();
+      setEditingPlan(null);
+    } catch (err) {
+      toast.error('Failed to update plan');
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!editingSub) return;
+    setIsSaving(true);
+    try {
+      await updateRestaurant(editingSub.id, { planId: newPlanId, status: newStatus as any });
+      toast.success('Subscription updated successfully');
+      loadBillingData();
+      setEditingSub(null);
+    } catch (err) {
+      toast.error('Failed to update subscription');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
 
   // Load Data with Robust Fallbacks against Rate Limits
   const loadBillingData = async (showToast = false) => {
@@ -53,6 +123,9 @@ export const SuperAdminBilling: React.FC = () => {
       if (showToast) setIsRefreshing(true);
       const restList = await listAllRestaurants().catch(() => []);
       const planList = await listAllPlans().catch(() => []);
+      const txnList = await listTransactions().catch(() => []);
+      
+      setTransactions(txnList);
       
       const fallbackRestaurants = (restList && restList.length > 0) ? restList : [
         {
@@ -194,23 +267,10 @@ export const SuperAdminBilling: React.FC = () => {
     });
   }, [restaurants]);
 
-  // Mock Transactions list
+  // Real Transactions list
   const allTransactions: any[] = useMemo(() => {
-    return allInvoices.map((inv, idx) => ({
-      id: `txn-sa-${idx}`,
-      restaurantId: inv.restaurantId,
-      restaurantName: inv.restaurantName,
-      invoiceId: inv.id,
-      invoiceNumber: inv.invoiceNumber,
-      amount: inv.total,
-      currency: inv.currency,
-      status: inv.status === 'paid' ? 'succeeded' : inv.status === 'overdue' ? 'failed' : 'pending',
-      paymentMethod: 'Visa •••• 4242',
-      providerReference: `tx_sa_${Math.random().toString(36).substring(7)}`,
-      description: 'Subscription payment',
-      date: inv.issueDate,
-    }));
-  }, [allInvoices]);
+    return transactions;
+  }, [transactions]);
 
   const unpaidInvoices = useMemo(() => {
     return allInvoices.filter(inv => inv.status === 'unpaid' || inv.status === 'overdue');
@@ -490,8 +550,10 @@ export const SuperAdminBilling: React.FC = () => {
                           <div>{r?.name || 'Restaurant'}</div>
                           <div className="text-[11px] text-slate-400 font-mono">/r/{r?.slug || 'slug'}</div>
                         </td>
-                        <td className="px-4 py-3 font-mono uppercase text-amber-400">{r?.planId || 'business'}</td>
-                        <td className="px-4 py-3 text-slate-300">Monthly (€59/mo)</td>
+                        <td className="px-4 py-3 font-mono uppercase text-amber-400">
+                          {plans.find(p => p.id === r.planId)?.name || r.planId || 'business'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">Monthly (€{plans.find(p => p.id === r.planId)?.priceMonthly || 59}/mo)</td>
                         <td className="px-4 py-3">
                           <span className={cn(
                             "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
@@ -507,7 +569,7 @@ export const SuperAdminBilling: React.FC = () => {
                         <td className="px-4 py-3 font-mono text-slate-400">{r?.vatNumber || r?.settings?.vatNumber || '—'}</td>
                         <td className="px-4 py-3 text-right space-x-2">
                           <button
-                            onClick={() => toast.success(`Viewing subscription details for ${r?.name || 'Restaurant'}`)}
+                            onClick={() => setEditingSub(r)}
                             className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold cursor-pointer"
                           >
                             Manage
@@ -536,6 +598,7 @@ export const SuperAdminBilling: React.FC = () => {
                     <th className="px-4 py-3">Payment Method</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -555,7 +618,15 @@ export const SuperAdminBilling: React.FC = () => {
                           {txn.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{txn.date}</td>
+                      <td className="px-4 py-3 text-slate-300 font-mono text-[11px]">{txn.date}</td>
+                      <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setDeletingRecord({ type: 'transaction', id: txn.id })}
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -600,7 +671,7 @@ export const SuperAdminBilling: React.FC = () => {
                           {inv.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
                         <button
                           onClick={async () => {
                             try {
@@ -610,10 +681,16 @@ export const SuperAdminBilling: React.FC = () => {
                               toast.error('Failed to download invoice PDF.');
                             }
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold flex items-center gap-1 ml-auto cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                         >
                           <Download size={12} />
                           <span>PDF</span>
+                        </button>
+                        <button
+                          onClick={() => setDeletingRecord({ type: 'invoice', id: inv.id })}
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
                         </button>
                       </td>
                     </tr>
@@ -666,13 +743,28 @@ export const SuperAdminBilling: React.FC = () => {
                       <td className="px-4 py-3 font-mono text-slate-400">{inv.customerEmail}</td>
                       <td className="px-4 py-3 text-right space-x-2">
                         <button
-                          onClick={() => toast.success(`Reminder sent to ${inv.customerEmail}`)}
+                          onClick={async () => {
+                            try {
+                              await sendReminder(inv.restaurantId, inv.id);
+                              toast.success(`Reminder sent to ${inv.customerEmail}`);
+                            } catch (err) {
+                              toast.error('Failed to send reminder.');
+                            }
+                          }}
                           className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold cursor-pointer"
                         >
                           Send Reminder
                         </button>
                         <button
-                          onClick={() => toast.success(`Invoice ${inv.id} marked as paid manually.`)}
+                          onClick={async () => {
+                            try {
+                              await markInvoicePaid(inv.id);
+                              toast.success(`Invoice ${inv.id} marked as paid successfully.`);
+                              loadBillingData();
+                            } catch (err) {
+                              toast.error('Failed to mark invoice as paid.');
+                            }
+                          }}
                           className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold cursor-pointer"
                         >
                           Mark Paid
@@ -691,33 +783,29 @@ export const SuperAdminBilling: React.FC = () => {
       {activeTab === 'plans' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { id: 'trial', name: 'Free Trial', price: 0, interval: '14 days', restaurants: metrics.trialSubs, features: ['Core reservations', 'Table management', 'Up to 100 covers/day'] },
-              { id: 'professional', name: 'Professional Plan', price: 29, interval: 'month', restaurants: 12, features: ['Unlimited reservations', 'Customer insights', 'Custom branding', 'Priority support'] },
-              { id: 'business', name: 'Business Plan', price: 59, interval: 'month', restaurants: metrics.activePaidSubs, features: ['Multi-area floor plans', 'Advanced analytics', 'SMS notifications', 'Dedicated account manager'] },
-            ].map((p) => (
+            {plans.map((p) => (
               <div key={p.id} className="p-6 bg-slate-950 border border-slate-800 rounded-2xl space-y-4 flex flex-col justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold text-white">{p.name}</h3>
                     <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 text-[10px] font-mono uppercase font-bold">
-                      {p.restaurants} Active
+                      Active
                     </span>
                   </div>
                   <div className="text-3xl font-black text-amber-400">
-                    {formatCurrency(p.price, 'EUR')} <span className="text-xs text-slate-400 font-normal">/ {p.interval}</span>
+                    {formatCurrency(p.priceMonthly, p.currency)} <span className="text-xs text-slate-400 font-normal">/ month</span>
                   </div>
                   <ul className="space-y-2 pt-2 text-xs text-slate-300">
-                    {p.features.map((f, i) => (
+                    {p.customFeatures?.map((f, i) => (
                       <li key={i} className="flex items-center gap-2">
                         <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
-                        <span>{f}</span>
+                        <span>{f.title}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
                 <button
-                  onClick={() => toast.success(`Plan settings updated for ${p.name}`)}
+                  onClick={() => setEditingPlan(p)}
                   className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Configure Plan
@@ -779,6 +867,96 @@ export const SuperAdminBilling: React.FC = () => {
                 className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-colors cursor-pointer"
               >
                 Save Billing Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingSub && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-6 space-y-4">
+            <h2 className="text-lg font-bold text-white">Manage Subscription: {editingSub.name}</h2>
+            <div className="space-y-3">
+              <label className="text-xs text-slate-400">Plan</label>
+              <select 
+                className="w-full bg-slate-800 text-white p-2 rounded-lg text-xs" 
+                value={newPlanId}
+                onChange={(e) => setNewPlanId(e.target.value)}
+              >
+                {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <label className="text-xs text-slate-400">Status</label>
+              <select 
+                className="w-full bg-slate-800 text-white p-2 rounded-lg text-xs" 
+                value={newStatus}
+                onChange={(e) => setNewStatus(e.target.value)}
+              >
+                <option value="active">Active</option>
+                <option value="trial">Trial</option>
+                <option value="suspended">Suspended</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={() => setEditingSub(null)} className="px-4 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer">Cancel</button>
+              <button onClick={handleSave} disabled={isSaving} className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50">
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deletingRecord && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-lg font-bold text-white">Confirm Deletion</h2>
+            <p className="text-xs text-slate-400">Are you sure you want to delete this {deletingRecord.type}? This action cannot be undone.</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setDeletingRecord(null)} className="px-4 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer">Cancel</button>
+              <button 
+                onClick={async () => {
+                  try {
+                    if (deletingRecord.type === 'invoice') await deleteInvoice(deletingRecord.id);
+                    else await deleteTransaction(deletingRecord.id);
+                    toast.success(`${deletingRecord.type === 'invoice' ? 'Invoice' : 'Transaction'} deleted successfully`);
+                    loadBillingData();
+                  } catch (err) {
+                    toast.error(`Failed to delete ${deletingRecord.type}`);
+                  }
+                  setDeletingRecord(null);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingPlan && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-6 space-y-4">
+            <h2 className="text-lg font-bold text-white">Edit Plan: {editingPlan.name}</h2>
+            <div className="space-y-3">
+              <label className="text-xs text-slate-400">Plan Name</label>
+              <input 
+                type="text" 
+                className="w-full bg-slate-800 text-white p-2 rounded-lg text-xs" 
+                value={newPlanName}
+                onChange={(e) => setNewPlanName(e.target.value)}
+              />
+              <label className="text-xs text-slate-400">Monthly Price</label>
+              <input 
+                type="number" 
+                className="w-full bg-slate-800 text-white p-2 rounded-lg text-xs" 
+                value={newPlanPrice}
+                onChange={(e) => setNewPlanPrice(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={() => setEditingPlan(null)} className="px-4 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer">Cancel</button>
+              <button onClick={handleSavePlan} disabled={isSavingPlan} className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50">
+                {isSavingPlan ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>

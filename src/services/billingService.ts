@@ -8,6 +8,8 @@ import {
 } from '../types';
 import { generateInvoicePdf } from '../features/billing/utils/invoicePdfGenerator';
 import { DEFAULT_PLANS } from '../data/plans';
+import { doc, deleteDoc, collection, getDocs, query } from 'firebase/firestore';
+import { db } from '../firebase';
 
 /**
  * Fetch billing overview including summary cards, subscription details, invoices, and transactions.
@@ -267,6 +269,68 @@ export async function deletePaymentMethod(restaurantId: string, methodId: string
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'Failed to delete payment method');
   }
+}
+
+export async function deleteInvoice(invoiceId: string): Promise<void> {
+  const res = await fetch(`/api/billing/invoices/${encodeURIComponent(invoiceId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to delete invoice');
+  }
+}
+
+export async function deleteTransaction(transactionId: string): Promise<void> {
+  // 1. Attempt API call first
+  try {
+    const res = await fetch(`/api/billing/transactions/${encodeURIComponent(transactionId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error('API delete failed');
+  } catch (apiErr) {
+    console.warn('[billingService] API delete failed, attempting direct Firestore deletion:', apiErr);
+    
+    // 2. Fallback to direct Firestore deletion
+    try {
+      await deleteDoc(doc(db, 'transactions', transactionId));
+    } catch (dbErr) {
+      console.error('[billingService] Direct Firestore deletion failed:', dbErr);
+      throw new Error('Failed to delete transaction record');
+    }
+  }
+}
+
+export async function sendReminder(restaurantId: string, invoiceId: string): Promise<void> {
+  const res = await fetch(`/api/billing/reminders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restaurantId, invoiceId }),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to send reminder');
+  }
+}
+
+export async function markInvoicePaid(invoiceId: string): Promise<void> {
+  const res = await fetch(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to mark invoice as paid');
+  }
+}
+export async function listTransactions(): Promise<PaymentTransaction[]> {
+  const transactions: PaymentTransaction[] = [];
+  try {
+    const q = query(collection(db, 'transactions'));
+    const snap = await getDocs(q);
+    snap.forEach((doc) => {
+      transactions.push({ id: doc.id, ...doc.data() } as PaymentTransaction);
+    });
+  } catch (err) {
+    console.error('[billingService] Failed to list transactions:', err);
+  }
+  return transactions;
 }
 
 /**
