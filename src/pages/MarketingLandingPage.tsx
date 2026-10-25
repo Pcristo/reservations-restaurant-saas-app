@@ -342,6 +342,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                 src={dashboardImages[activeDashboardImg]}
                 alt={`DineMaster Pro Dashboard ${activeDashboardImg + 1}`}
                 className="w-full h-full object-cover object-top"
+                style={{ objectFit: 'cover', objectPosition: 'top' }}
                 onError={() => {
                   setImageErrors(prev => ({ ...prev, [activeDashboardImg]: true }));
                 }}
@@ -350,24 +351,22 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                 }}
                 referrerPolicy="no-referrer"
               />
-              {/* Fallback graphic ONLY if image is missing or failed to load */}
-              {imageErrors[activeDashboardImg] && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-center p-6 pointer-events-none">
-                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 shadow-md">
-                    <LayoutGrid size={24} />
-                  </div>
-                  <div className="text-sm font-bold text-white mb-1">
-                    {activeDashboardImg === 0 
-                      ? (isPt ? 'Painel de Controlo & Gestão em Tempo Real' : 'Real-time Operations & Floor Control') 
-                      : activeDashboardImg === 1 
-                      ? (isPt ? 'Visão de Mesas & Ocupação' : 'Table Status & Live Cover Tracking')
-                      : (isPt ? 'Gestão de Clientes & Reservas' : 'Guest Relations & Reservation Hub')}
-                  </div>
-                  <div className="text-xs text-slate-300 max-w-sm">
-                    {isPt ? 'Sistema operacional inteligente para restaurantes modernos.' : 'One intelligent operating system built for modern restaurants.'}
-                  </div>
+              {/* Fallback graphic if image is empty */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/45 text-center p-6 pointer-events-none">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 shadow-md">
+                  <LayoutGrid size={24} />
                 </div>
-              )}
+                <div className="text-sm font-bold text-white mb-1">
+                  {activeDashboardImg === 0 
+                    ? (isPt ? 'Painel de Controlo & Gestão em Tempo Real' : 'Real-time Operations & Floor Control') 
+                    : activeDashboardImg === 1 
+                    ? (isPt ? 'Visão de Mesas & Ocupação' : 'Table Status & Live Cover Tracking')
+                    : (isPt ? 'Gestão de Clientes & Reservas' : 'Guest Relations & Reservation Hub')}
+                </div>
+                <div className="text-xs text-slate-300 max-w-sm">
+                  {isPt ? 'Sistema operacional inteligente para restaurantes modernos.' : 'One intelligent operating system built for modern restaurants.'}
+                </div>
+              </div>
             </motion.div>
           </AnimatePresence>
 
