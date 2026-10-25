@@ -341,8 +341,8 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <img
                 src={dashboardImages[activeDashboardImg]}
                 alt={`DineMaster Pro Dashboard ${activeDashboardImg + 1}`}
-                className="w-full h-full object-cover object-top"
-                style={{ objectFit: 'cover', objectPosition: 'top' }}
+                className="w-full h-full object-contain"
+                style={{ objectFit: 'contain' }}
                 onError={() => {
                   setImageErrors(prev => ({ ...prev, [activeDashboardImg]: true }));
                 }}
