@@ -17,6 +17,7 @@ import { db } from '../firebase';
 import { User, SuperAdminInvitation } from '../types';
 import { logAuditAction } from './tenantService';
 import { APP_CONFIG } from '../data/appConfig';
+import { isUserSuperAdmin } from '../lib/permissions';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const MASTER_ADMIN_EMAIL = 'pcristo35@gmail.com';
@@ -55,12 +56,6 @@ export async function listSuperAdmins(): Promise<User[]> {
         createdAt: '2025-01-01T00:00:00.000Z',
       });
     }
-
-    // Cache list of emails in localStorage for instant synchronization & permission checks
-    try {
-      const emailList = admins.map(a => (a.email || '').toLowerCase().trim()).filter(Boolean);
-      localStorage.setItem('dinemaster_superadmin_emails', JSON.stringify(emailList));
-    } catch {}
 
     return admins;
   } catch (err) {
@@ -107,6 +102,11 @@ export async function inviteSuperAdmin(
   data: { email: string; name: string; notes?: string },
   actor: User | null
 ): Promise<{ inviteId: string; inviteUrl: string }> {
+  // Guard: Creator must be an authenticated and authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can invite another Super Admin.');
+  }
+
   const cleanEmail = data.email.trim().toLowerCase();
   const cleanName = data.name.trim() || cleanEmail.split('@')[0];
 
@@ -120,9 +120,12 @@ export async function inviteSuperAdmin(
   }
 
   const inviteId = `invite-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const nowIso = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  // 7-day expiration time limit
+  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  // 1. Create invitation record
+  // 1. Create invitation record with expiration and invitedBy audit metadata
   const invitationRecord: SuperAdminInvitation = {
     id: inviteId,
     email: cleanEmail,
@@ -131,6 +134,7 @@ export async function inviteSuperAdmin(
     status: 'pending',
     invitedBy: actor?.email || MASTER_ADMIN_EMAIL,
     createdAt: nowIso,
+    expiresAt,
     notes: data.notes || '',
   };
 
@@ -172,16 +176,6 @@ export async function inviteSuperAdmin(
     });
   }
 
-  // Update cached emails
-  try {
-    const cached = localStorage.getItem('dinemaster_superadmin_emails');
-    const list: string[] = cached ? JSON.parse(cached) : [];
-    if (!list.includes(cleanEmail)) {
-      list.push(cleanEmail);
-      localStorage.setItem('dinemaster_superadmin_emails', JSON.stringify(list));
-    }
-  } catch {}
-
   // 3. Log audit action
   await logAuditAction({
     restaurantId: 'platform',
@@ -191,7 +185,7 @@ export async function inviteSuperAdmin(
     userEmail: actor?.email || MASTER_ADMIN_EMAIL,
     action: 'superadmin.invite_created',
     resource: `super_admin_invitations/${inviteId}`,
-    details: { invitedEmail: cleanEmail, invitedName: cleanName },
+    details: { invitedEmail: cleanEmail, invitedName: cleanName, expiresAt },
     result: 'success',
   });
 
@@ -204,6 +198,7 @@ export async function inviteSuperAdmin(
   };
 }
 
+
 /**
  * Directly create a Super Admin with Email & Password
  * Uses secondary Firebase Auth instance so the current Super Admin is never logged out.
@@ -212,6 +207,11 @@ export async function createSuperAdminWithPassword(
   data: { email: string; name: string; password: string; notes?: string },
   actor: User | null
 ): Promise<User> {
+  // Guard: Creator must be an authenticated and authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can create another Super Admin.');
+  }
+
   const cleanEmail = data.email.trim().toLowerCase();
   const cleanName = data.name.trim() || cleanEmail.split('@')[0];
 
@@ -275,16 +275,6 @@ export async function createSuperAdminWithPassword(
     }
   } catch (e) {}
 
-  // Update cached emails
-  try {
-    const cached = localStorage.getItem('dinemaster_superadmin_emails');
-    const list: string[] = cached ? JSON.parse(cached) : [];
-    if (!list.includes(cleanEmail)) {
-      list.push(cleanEmail);
-      localStorage.setItem('dinemaster_superadmin_emails', JSON.stringify(list));
-    }
-  } catch {}
-
   // Log audit action
   await logAuditAction({
     restaurantId: 'platform',
@@ -309,6 +299,11 @@ export async function toggleSuperAdminStatus(
   newStatus: 'active' | 'suspended' | 'inactive',
   actor: User | null
 ): Promise<void> {
+  // Guard: Actor must be an authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can modify administrator status.');
+  }
+
   const targetEmail = (adminUser.email || '').trim().toLowerCase();
 
   // Guard: Master Admin cannot be suspended
@@ -319,6 +314,17 @@ export async function toggleSuperAdminStatus(
   // Guard: Actor cannot suspend themselves
   if (actor?.email && actor.email.toLowerCase() === targetEmail) {
     throw new Error('You cannot deactivate your own Super Admin account.');
+  }
+
+  // Lockout protection: Cannot deactivate the platform's last active Super Admin
+  if (newStatus !== 'active') {
+    const allAdmins = await listSuperAdmins();
+    const remainingActive = allAdmins.filter(
+      a => a.status === 'active' && a.id !== adminUser.id && (a.email || '').toLowerCase() !== targetEmail
+    );
+    if (remainingActive.length === 0) {
+      throw new Error('Lockout Protection: Cannot deactivate the platform\'s last active Super Admin.');
+    }
   }
 
   await updateDoc(doc(db, 'users', adminUser.id), {
@@ -346,6 +352,11 @@ export async function removeSuperAdmin(
   adminUser: User,
   actor: User | null
 ): Promise<void> {
+  // Guard: Actor must be an authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can remove an administrator.');
+  }
+
   const targetEmail = (adminUser.email || '').trim().toLowerCase();
 
   // Guard: Master Admin cannot be removed
@@ -358,18 +369,17 @@ export async function removeSuperAdmin(
     throw new Error('You cannot remove your own Super Admin account.');
   }
 
-  // Delete or demote user doc
-  await deleteDoc(doc(db, 'users', adminUser.id));
+  // Lockout protection: Cannot delete the platform's last active Super Admin
+  const allAdmins = await listSuperAdmins();
+  const remainingActive = allAdmins.filter(
+    a => a.status === 'active' && a.id !== adminUser.id && (a.email || '').toLowerCase() !== targetEmail
+  );
+  if (remainingActive.length === 0) {
+    throw new Error('Lockout Protection: Cannot delete the platform\'s last active Super Admin.');
+  }
 
-  // Remove from cached emails
-  try {
-    const cached = localStorage.getItem('dinemaster_superadmin_emails');
-    if (cached) {
-      const list: string[] = JSON.parse(cached);
-      const filtered = list.filter(e => e.toLowerCase() !== targetEmail);
-      localStorage.setItem('dinemaster_superadmin_emails', JSON.stringify(filtered));
-    }
-  } catch {}
+  // Delete user doc
+  await deleteDoc(doc(db, 'users', adminUser.id));
 
   // Mark pending invitations as revoked
   try {
@@ -403,6 +413,11 @@ export async function revokeInvitation(
   email: string,
   actor: User | null
 ): Promise<void> {
+  // Guard: Actor must be an authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can revoke invitations.');
+  }
+
   await updateDoc(doc(db, 'super_admin_invitations', inviteId), {
     status: 'revoked',
     revokedAt: new Date().toISOString(),
@@ -443,6 +458,11 @@ export async function manuallyActivateInvitation(
   invite: SuperAdminInvitation,
   actor: User | null
 ): Promise<void> {
+  // Guard: Actor must be an authorized Super Admin
+  if (!actor || !isUserSuperAdmin(actor)) {
+    throw new Error('Unauthorized: Only an authenticated Super Admin can manually activate invitations.');
+  }
+
   const nowIso = new Date().toISOString();
   const cleanEmail = invite.email.toLowerCase().trim();
 
@@ -483,17 +503,7 @@ export async function manuallyActivateInvitation(
     });
   }
 
-  // 3. Update localStorage cache
-  try {
-    const cached = localStorage.getItem('dinemaster_superadmin_emails');
-    const list: string[] = cached ? JSON.parse(cached) : [];
-    if (!list.includes(cleanEmail)) {
-      list.push(cleanEmail);
-      localStorage.setItem('dinemaster_superadmin_emails', JSON.stringify(list));
-    }
-  } catch {}
-
-  // 4. Log audit action
+  // 3. Log audit action
   await logAuditAction({
     restaurantId: 'platform',
     restaurantName: APP_CONFIG.appName,
@@ -618,31 +628,23 @@ export async function checkSuperAdminAccess(
     return { isAuthorizedSuperAdmin: true, isRestaurantTenant: false };
   }
 
-  // 5. Check if user has an active super admin invitation
+  // 5. Check if user has a valid unexpired pending super admin invitation
   try {
     const qInv = query(collection(db, 'super_admin_invitations'), where('email', '==', cleanEmail));
     const snapInv = await getDocs(qInv);
     if (!snapInv.empty) {
       const invData = snapInv.docs[0].data() as SuperAdminInvitation;
-      if (invData.status !== 'revoked') {
-        return { isAuthorizedSuperAdmin: true, isRestaurantTenant: false };
+      if (invData.status === 'pending') {
+        const isExpired = invData.expiresAt && new Date(invData.expiresAt).getTime() < Date.now();
+        if (!isExpired) {
+          return { isAuthorizedSuperAdmin: true, isRestaurantTenant: false };
+        }
       }
     }
   } catch (e) {
     console.warn('[checkSuperAdminAccess] Notice querying invitations:', e);
   }
 
-  // 6. Check cached super admin emails from panel additions
-  try {
-    const cached = localStorage.getItem('dinemaster_superadmin_emails');
-    if (cached) {
-      const list: string[] = JSON.parse(cached);
-      if (list.some(e => e.toLowerCase() === cleanEmail)) {
-        return { isAuthorizedSuperAdmin: true, isRestaurantTenant: false };
-      }
-    }
-  } catch {}
-
-  // 7. Not a super admin
+  // 6. Not a super admin
   return { isAuthorizedSuperAdmin: false, isRestaurantTenant: false, reason: 'not_super_admin' };
 }

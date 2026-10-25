@@ -2468,7 +2468,7 @@ const FloorPlanFilterDropdown: React.FC<{
               <div className="p-2.5 rounded-xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
                 <Sparkles size={20} />
               </div>
-              <span className="text-base sm:text-lg font-black text-gray-900 dark:text-white tracking-tight">
+              <span className="text-base sm:text-lg font-black text-gray-500 tracking-tight">
                 Membership
               </span>
             </div>

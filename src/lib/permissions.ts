@@ -100,6 +100,7 @@ export function normalizeTenantIdentifier(idOrSlug: string | null | undefined): 
 /**
  * Strictly verifies whether a user is a platform Super Admin.
  * Restaurant-scoped accounts (with restaurantId or restaurantIds) can NEVER be Super Admin.
+ * Trust is derived strictly from the master super admin identity or authoritative user document role.
  */
 export function isUserSuperAdmin(userOrEmail: User | string | null | undefined): boolean {
   if (!userOrEmail) return false;
@@ -112,32 +113,14 @@ export function isUserSuperAdmin(userOrEmail: User | string | null | undefined):
     return true;
   }
 
+  // String email alone is not sufficient to grant Super Admin unless it matches master admin
   if (typeof userOrEmail === 'string') {
-    try {
-      const cached = localStorage.getItem('dinemaster_superadmin_emails');
-      if (cached) {
-        const emailList: string[] = JSON.parse(cached);
-        return emailList.some(e => e.toLowerCase() === cleanEmail);
-      }
-    } catch {}
     return false;
   }
 
+  // Deactivated or suspended accounts can never hold active super admin status
   if (userOrEmail.status === 'suspended' || userOrEmail.status === 'inactive') {
     return false;
-  }
-
-  // Check cached emails from Super Admin panel invitations / creations
-  if (cleanEmail) {
-    try {
-      const cached = localStorage.getItem('dinemaster_superadmin_emails');
-      if (cached) {
-        const emailList: string[] = JSON.parse(cached);
-        if (emailList.some(e => e.toLowerCase() === cleanEmail)) {
-          return true;
-        }
-      }
-    } catch {}
   }
 
   // Accounts associated with any restaurant tenant can NEVER be Super Admins
@@ -145,6 +128,7 @@ export function isUserSuperAdmin(userOrEmail: User | string | null | undefined):
     return false;
   }
 
+  // Authoritative role check on user object
   if (userOrEmail.role === 'super_admin' || (userOrEmail.role as any) === 'superadmin') {
     return true;
   }

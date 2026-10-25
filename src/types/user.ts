@@ -53,6 +53,7 @@ export interface SuperAdminInvitation {
   status: 'pending' | 'accepted' | 'revoked' | 'declined';
   invitedBy: string;
   createdAt: string;
+  expiresAt?: string;
   acceptedAt?: string;
   declinedAt?: string;
   revokedAt?: string;

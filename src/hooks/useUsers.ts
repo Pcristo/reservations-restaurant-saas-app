@@ -154,6 +154,9 @@ export function useUsers() {
 
   const updateUserRole = async (id: string, role: string) => {
     verifyUserAccess(id);
+    if (!isSuperAdmin && currentUser?.id === id) {
+      throw new Error('Unauthorized: You cannot change your own role.');
+    }
     if (role === 'super_admin' || role === 'superadmin') {
       throw new Error('Unauthorized: Cannot assign Super Admin role to restaurant users.');
     }
@@ -163,6 +166,9 @@ export function useUsers() {
 
   const updateUserStatus = async (id: string, status: 'active' | 'inactive') => {
     verifyUserAccess(id);
+    if (currentUser?.id === id && status === 'inactive') {
+      throw new Error('Unauthorized: You cannot deactivate your own account.');
+    }
     const targetUser = users.find(u => u.id === id);
     if (status === 'active' && targetUser?.status !== 'active') {
       const check = checkCanCreateResource(tenant?.entitlements, 'staff', activeStaffCount);
@@ -175,6 +181,9 @@ export function useUsers() {
 
   const updateUser = async (id: string, data: Partial<User>) => {
     verifyUserAccess(id);
+    if (!isSuperAdmin && currentUser?.id === id && data.role && data.role !== currentUser.role) {
+      throw new Error('Unauthorized: You cannot change your own role.');
+    }
     const updateData: Record<string, any> = { ...data };
     if (updateData.role === 'super_admin' || updateData.role === 'superadmin') {
       delete updateData.role;
@@ -300,6 +309,9 @@ export function useUsers() {
 
   const deleteUser = async (id: string) => {
     verifyUserAccess(id);
+    if (currentUser?.id === id) {
+      throw new Error('Unauthorized: You cannot delete your own account.');
+    }
     try {
       let authUid = null;
       let email = null;

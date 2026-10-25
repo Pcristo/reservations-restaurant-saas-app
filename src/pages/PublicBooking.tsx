@@ -11,7 +11,7 @@ import dayjs from 'dayjs';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, getOptimizedUrl, formatDisplayTime, getEffectiveOpeningHours, getRestaurantDefaultCountryCode } from '../lib/utils';
 import { useTenantSafe } from '../hooks/useTenant';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Link, useLocation } from 'react-router-dom';
 import { loadReCaptcha, executeReCaptcha } from '../lib/recaptcha';
@@ -863,6 +863,7 @@ export default function PublicBooking() {
       // Always look up customer in customers collection by user.id, phone, email, or name to ensure accurate isRegular status from DB
       try {
         let matchedCustomerData: any = null;
+        const cleanEmail = formData.email?.trim().toLowerCase();
 
         if (user?.id) {
           const custDoc = await getDoc(doc(db, 'customers', user.id));
@@ -872,30 +873,15 @@ export default function PublicBooking() {
           }
         }
 
-        if (!matchedCustomerData) {
-          const cleanPhone = formData.phone?.trim().replace(/\s+/g, '');
-          const cleanEmail = formData.email?.trim().toLowerCase();
-          const cleanName = formData.name?.trim().toLowerCase();
-
-          if (cleanPhone || cleanEmail || cleanName) {
-            const custSnapshot = await getDocs(collection(db, 'customers'));
-            const matchingCustomers = custSnapshot.docs
-              .map(d => ({ id: d.id, ...d.data() as any }))
-              .filter(c => {
-                const cEmail = c.email?.trim().toLowerCase();
-                const cPhone = c.phone?.trim().replace(/\s+/g, '');
-                const cName = c.name?.trim().toLowerCase();
-                if (cleanEmail && cEmail && cEmail === cleanEmail) return true;
-                if (cleanPhone && cPhone && cPhone === cleanPhone) return true;
-                if (cleanName && cName && cName === cleanName) return true;
-                return false;
-              });
-
-            if (matchingCustomers.length > 0) {
-              matchedCustomerData = matchingCustomers.find(c => c.isRegistered) || matchingCustomers[0];
-              matchedCustomerUid = matchedCustomerData.id;
+        if (!matchedCustomerData && user?.email && cleanEmail && cleanEmail === user.email.toLowerCase()) {
+          try {
+            const qOwn = query(collection(db, 'customers'), where('email', '==', cleanEmail), limit(1));
+            const ownSnap = await getDocs(qOwn);
+            if (!ownSnap.empty) {
+              matchedCustomerData = ownSnap.docs[0].data();
+              matchedCustomerUid = ownSnap.docs[0].id;
             }
-          }
+          } catch (e) {}
         }
 
         if (matchedCustomerData) {

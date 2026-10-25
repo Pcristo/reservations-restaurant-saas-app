@@ -176,19 +176,36 @@ service cloud.firestore {
                        (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
     }
 
-    // Customers directory (Strict tenant isolation)
+    // Customers directory (Strict tenant isolation & privacy protection)
     match /customers/{customerId} {
-      allow read: if true; // Needed for guest preference check during booking
+      allow read: if isSuperAdmin() || 
+                     (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null))) || 
+                     (resource.data.get('restaurantId', null) == null && isRestaurantStaff('main')) ||
+                     (isAuthenticated() && (
+                       request.auth.uid == customerId || 
+                       resource.data.get('authUid', '') == request.auth.uid || 
+                       (request.auth.token.email != null && (
+                         resource.data.get('email', '') == request.auth.token.email ||
+                         resource.data.get('email', '') == request.auth.token.email.lower()
+                       ))
+                     ));
       allow create: if true; // Allow guest/public booking customer record creation
       allow update: if isSuperAdmin() || 
                        (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null))) || 
                        (resource.data.get('restaurantId', null) == null && isRestaurantStaff('main')) ||
-                       (isAuthenticated() && (request.auth.uid == customerId || resource.data.get('authUid', '') == request.auth.uid || resource.data.get('email', '') == request.auth.token.email));
+                       (isAuthenticated() && (
+                         request.auth.uid == customerId || 
+                         resource.data.get('authUid', '') == request.auth.uid || 
+                         (request.auth.token.email != null && (
+                           resource.data.get('email', '') == request.auth.token.email ||
+                           resource.data.get('email', '') == request.auth.token.email.lower()
+                         ))
+                       ));
       allow delete: if isSuperAdmin() || 
                        (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
     }
 
-    // Users and Staff accounts (Strict tenant isolation)
+    // Users and Staff accounts (Strict tenant isolation & Anti-Privilege Escalation)
     match /users/{userId} {
       allow read: if isSuperAdmin() || 
                      (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null))) || 
@@ -201,9 +218,24 @@ service cloud.firestore {
                        ))
                      ));
       allow create: if isSuperAdmin() || 
-                       (isAuthenticated() && (request.auth.uid == userId || request.resource.data.get('authUid', '') == request.auth.uid) && request.resource.data.get('role', '') != 'super_admin' && request.resource.data.get('role', '') != 'superadmin') ||
-                       (request.resource.data.get('restaurantId', null) != null && isRestaurantAdmin(request.resource.data.get('restaurantId', null)) && request.resource.data.get('role', '') in ['staff', 'restaurant_staff', 'admin', 'restaurant_manager', 'customer']);
+                       // Public / Customer self-registration: MUST be customer role only, NO administrative permissions or tenant association
+                       (
+                         isAuthenticated() && 
+                         (request.auth.uid == userId || request.resource.data.get('authUid', '') == request.auth.uid) && 
+                         request.resource.data.get('role', '') == 'customer' &&
+                         !request.resource.data.keys().hasAny(['permissions']) &&
+                         (request.resource.data.get('restaurantId', null) == null || request.resource.data.get('restaurantId', '') == '')
+                       ) ||
+                       // Restaurant Admin creating staff or admin within their own restaurant
+                       (
+                         request.resource.data.get('restaurantId', null) != null && 
+                         isRestaurantAdmin(request.resource.data.get('restaurantId', null)) && 
+                         request.resource.data.get('role', '') in ['staff', 'restaurant_staff', 'admin', 'restaurant_manager'] &&
+                         request.resource.data.get('role', '') != 'super_admin' &&
+                         request.resource.data.get('role', '') != 'superadmin'
+                       );
       allow update: if isSuperAdmin() || 
+                       // Restaurant Admin updating staff in their restaurant (cannot change own role, cannot create/promote super_admin, cannot switch restaurant)
                        (
                          resource.data.get('restaurantId', null) != null &&
                          isRestaurantAdmin(resource.data.get('restaurantId', null)) &&
@@ -211,7 +243,9 @@ service cloud.firestore {
                          resource.data.get('role', '') != 'superadmin' &&
                          request.resource.data.get('role', '') in ['staff', 'restaurant_staff', 'admin', 'restaurant_manager', 'restaurant_owner', 'customer'] &&
                          request.resource.data.get('restaurantId', null) == resource.data.get('restaurantId', null) &&
-                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['restaurantId', 'restaurantIds'])
+                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['restaurantId', 'restaurantIds']) &&
+                         // Lockout & privilege protection: Restaurant admin cannot change their own role!
+                         (request.auth.uid != userId || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
                        ) || 
                        (
                          resource.data.get('restaurantId', null) != null &&
@@ -219,12 +253,24 @@ service cloud.firestore {
                          resource.data.get('role', '') == 'customer' &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
                        ) || 
+                       // Self-profile update: CANNOT touch role, permissions, status, restaurantId or restaurantIds
                        (
                          isAuthenticated() &&
                          (request.auth.uid == userId || resource.data.get('authUid', '') == request.auth.uid) &&
-                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'restaurantId', 'restaurantIds'])
+                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'restaurantId', 'restaurantIds', 'status', 'permissions'])
                        );
-      allow delete: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)) && resource.data.get('role', '') != 'super_admin');
+      allow delete: if (
+                        isSuperAdmin() && 
+                        resource.data.get('email', '') != 'pcristo35@gmail.com' &&
+                        !(request.auth.uid == userId && resource.data.get('role', '') in ['super_admin', 'superadmin'])
+                      ) || 
+                      (
+                        resource.data.get('restaurantId', null) != null && 
+                        isRestaurantAdmin(resource.data.get('restaurantId', null)) && 
+                        resource.data.get('role', '') != 'super_admin' &&
+                        resource.data.get('role', '') != 'superadmin' &&
+                        request.auth.uid != userId
+                      );
     }
 
     // Phone verifications
@@ -288,7 +334,7 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
-    // Super Admin Invitations
+    // Super Admin Invitations (Single-use, time-limited, revocation-enforced)
     match /super_admin_invitations/{inviteId} {
       allow read: if isSuperAdmin() || (
         isAuthenticated() && 
@@ -296,13 +342,35 @@ service cloud.firestore {
         (resource.data.get('email', '') == request.auth.token.email.lower() || resource.data.get('email', '') == request.auth.token.email)
       );
       allow get: if true;
-      allow write: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
       allow update: if isSuperAdmin() || (
         isAuthenticated() && 
         request.auth.token.email != null && 
+        resource.data.get('status', '') == 'pending' &&
         (resource.data.get('email', '') == request.auth.token.email.lower() || resource.data.get('email', '') == request.auth.token.email) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'declinedAt'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'declinedAt']) &&
+        request.resource.data.get('status', '') in ['accepted', 'declined']
       );
+    }
+
+    // Restaurant Staff & Admin Invitations (Single-use, time-limited, restaurant-scoped)
+    match /invitations/{inviteId} {
+      allow read: if isSuperAdmin() || 
+                     (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null))) ||
+                     (isAuthenticated() && request.auth.token.email != null && (resource.data.get('email', '') == request.auth.token.email.lower() || resource.data.get('email', '') == request.auth.token.email));
+      allow create: if isSuperAdmin() || 
+                       (request.resource.data.get('restaurantId', null) != null && isRestaurantAdmin(request.resource.data.get('restaurantId', null)) && request.resource.data.get('role', '') in ['staff', 'restaurant_staff', 'admin', 'restaurant_manager']);
+      allow update: if isSuperAdmin() || 
+                       (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null))) ||
+                       (
+                         isAuthenticated() && 
+                         resource.data.get('status', '') == 'pending' &&
+                         request.auth.token.email != null && 
+                         (resource.data.get('email', '') == request.auth.token.email.lower() || resource.data.get('email', '') == request.auth.token.email) &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'declinedAt']) &&
+                         request.resource.data.get('status', '') in ['accepted', 'declined']
+                       );
+      allow delete: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
     }
 
     // Smart alerts

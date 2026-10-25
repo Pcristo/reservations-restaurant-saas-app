@@ -23,14 +23,6 @@ export function ProtectedRoute({
   const { language } = useLanguage();
   const isSuper = isSuperAdmin || isUserSuperAdmin(user);
 
-  const params = new URLSearchParams(location.search);
-  const isAssistanceMode = params.get('assistance_mode') === 'true' || sessionStorage.getItem('assistance_mode') === 'true';
-
-  if (isAssistanceMode) {
-    sessionStorage.setItem('assistance_mode', 'true');
-    return <>{children}</>;
-  }
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] py-12">
@@ -40,6 +32,9 @@ export function ProtectedRoute({
   }
 
   if (!user) {
+    try {
+      sessionStorage.removeItem('assistance_mode');
+    } catch {}
     const isStaffRoute = location.pathname.includes('/admin') || location.pathname.includes('/staff');
     const targetSlug = normalizeTenantIdentifier(slug || tenant?.slug || 'bela-italia') || 'bela-italia';
     const dest = isStaffRoute 
@@ -49,7 +44,17 @@ export function ProtectedRoute({
   }
   
   if (isSuper) {
+    const params = new URLSearchParams(location.search);
+    if (params.get('assistance_mode') === 'true') {
+      try {
+        sessionStorage.setItem('assistance_mode', 'true');
+      } catch {}
+    }
     return <>{children}</>;
+  } else {
+    try {
+      sessionStorage.removeItem('assistance_mode');
+    } catch {}
   }
 
   // Strict cross-tenant guard for restaurant admin & staff routes

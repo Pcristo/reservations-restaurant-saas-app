@@ -41,6 +41,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [scrollY, setScrollY] = useState(0);
   const [activeDashboardImg, setActiveDashboardImg] = useState(0);
+  const [imageErrors, setImageErrors] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -340,38 +341,41 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <img
                 src={dashboardImages[activeDashboardImg]}
                 alt={`DineMaster Pro Dashboard ${activeDashboardImg + 1}`}
-                className="w-full h-full object-contain bg-slate-950/40"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
+                className="w-full h-full object-cover object-top"
+                onError={() => {
+                  setImageErrors(prev => ({ ...prev, [activeDashboardImg]: true }));
+                }}
+                onLoad={() => {
+                  setImageErrors(prev => ({ ...prev, [activeDashboardImg]: false }));
                 }}
                 referrerPolicy="no-referrer"
               />
-              {/* Image Overlay reduced to 0.05 */}
-              <div className="absolute inset-0 bg-slate-950/5 pointer-events-none" />
-              {/* Fallback graphic if image is empty */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/85 text-center p-6 pointer-events-none">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 shadow-md">
-                  <LayoutGrid size={24} />
+              {/* Fallback graphic ONLY if image is missing or failed to load */}
+              {imageErrors[activeDashboardImg] && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-center p-6 pointer-events-none">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 shadow-md">
+                    <LayoutGrid size={24} />
+                  </div>
+                  <div className="text-sm font-bold text-white mb-1">
+                    {activeDashboardImg === 0 
+                      ? (isPt ? 'Painel de Controlo & Gestão em Tempo Real' : 'Real-time Operations & Floor Control') 
+                      : activeDashboardImg === 1 
+                      ? (isPt ? 'Visão de Mesas & Ocupação' : 'Table Status & Live Cover Tracking')
+                      : (isPt ? 'Gestão de Clientes & Reservas' : 'Guest Relations & Reservation Hub')}
+                  </div>
+                  <div className="text-xs text-slate-300 max-w-sm">
+                    {isPt ? 'Sistema operacional inteligente para restaurantes modernos.' : 'One intelligent operating system built for modern restaurants.'}
+                  </div>
                 </div>
-                <div className="text-sm font-bold text-white mb-1">
-                  {activeDashboardImg === 0 
-                    ? (isPt ? 'Painel de Controlo & Gestão em Tempo Real' : 'Real-time Operations & Floor Control') 
-                    : activeDashboardImg === 1 
-                    ? (isPt ? 'Visão de Mesas & Ocupação' : 'Table Status & Live Cover Tracking')
-                    : (isPt ? 'Gestão de Clientes & Reservas' : 'Guest Relations & Reservation Hub')}
-                </div>
-                <div className="text-xs text-slate-400 max-w-sm">
-                  {isPt ? 'Sistema operacional inteligente para restaurantes modernos.' : 'One intelligent operating system built for modern restaurants.'}
-                </div>
-              </div>
+              )}
             </motion.div>
           </AnimatePresence>
 
           {/* Carousel Navigation Controls */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-4 z-20 bg-slate-950/85 backdrop-blur-md px-5 py-2.5 rounded-full border border-slate-800 shadow-xl">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 sm:gap-4 z-20 bg-slate-950/90 backdrop-blur-md px-4 sm:px-5 py-2 sm:py-2.5 rounded-full border border-slate-800 shadow-xl max-w-[92%] sm:max-w-none">
             <button
               onClick={() => setActiveDashboardImg(prev => (prev - 1 + dashboardImages.length) % dashboardImages.length)}
-              className="text-xs font-bold text-slate-300 hover:text-white px-2 py-1 cursor-pointer transition-colors"
+              className="text-xs font-bold text-slate-300 hover:text-white px-1.5 py-1 cursor-pointer transition-colors"
             >
               ‹ {isPt ? 'Anterior' : 'Prev'}
             </button>
@@ -389,10 +393,17 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             </div>
             <button
               onClick={() => setActiveDashboardImg(prev => (prev + 1) % dashboardImages.length)}
-              className="text-xs font-bold text-slate-300 hover:text-white px-2 py-1 cursor-pointer transition-colors"
+              className="text-xs font-bold text-slate-300 hover:text-white px-1.5 py-1 cursor-pointer transition-colors"
             >
               {isPt ? 'Seguinte' : 'Next'} ›
             </button>
+            <div className="hidden md:flex items-center text-[11px] font-medium text-slate-300 border-l border-slate-700/80 pl-3">
+              {activeDashboardImg === 0 
+                ? (isPt ? 'Painel de Controlo' : 'Dashboard Overview') 
+                : activeDashboardImg === 1 
+                ? (isPt ? 'Visão de Mesas & Sala' : 'Table & Floor View')
+                : (isPt ? 'Gestão de Reservas' : 'Reservations Hub')}
+            </div>
           </div>
         </div>
       </div>

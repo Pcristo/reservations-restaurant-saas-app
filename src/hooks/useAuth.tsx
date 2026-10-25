@@ -106,29 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
   const { t, language } = useLanguage();
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const isAssistance = params.get('assistance_mode') === 'true' || sessionStorage.getItem('assistance_mode') === 'true';
-      if (isAssistance) {
-        sessionStorage.setItem('assistance_mode', 'true');
-        if (!user || !isUserSuperAdmin(user)) {
-          const superAdminUser: User = {
-            id: 'super-admin-assistance',
-            authUid: 'super-admin-assistance',
-            email: 'pcristo35@gmail.com',
-            name: 'Super Admin (Assistance)',
-            role: 'super_admin',
-            status: 'active',
-          };
-          setUser(superAdminUser);
-          try {
-            localStorage.setItem('cached_user_profile', JSON.stringify(superAdminUser));
-          } catch {}
-        }
-      }
-    }
-  }, []);
+
 
   const updateUserWithCache = (newUser: User | null) => {
     setUser(prev => {
@@ -422,45 +400,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {}
           }
 
-          // 2b. CHECK IF USER HAS A SUPER ADMIN INVITATION OR IS PRE-APPROVED SUPER ADMIN
+          // 2b. CHECK IF USER HAS A VALID PENDING SUPER ADMIN INVITATION
           if (!staffDocSnap && userEmail) {
             try {
               let isInvitedSuperAdmin = false;
               let invitedName = '';
 
               try {
-                const cachedSuperAdmins = localStorage.getItem('dinemaster_superadmin_emails');
-                if (cachedSuperAdmins) {
-                  const emailList: string[] = JSON.parse(cachedSuperAdmins);
-                  if (emailList.some(e => e.toLowerCase() === userEmail)) {
+                const qInv = query(
+                  collection(db, 'super_admin_invitations'),
+                  where('email', '==', userEmail)
+                );
+                const snapInv = await getDocs(qInv);
+                if (!snapInv.empty) {
+                  const invDoc = snapInv.docs[0];
+                  const inv = invDoc.data();
+                  const isExpired = inv.expiresAt && new Date(inv.expiresAt).getTime() < Date.now();
+                  // Strict check: status MUST be pending and NOT expired
+                  if (inv.status === 'pending' && !isExpired) {
                     isInvitedSuperAdmin = true;
+                    invitedName = inv.name || '';
+                    try {
+                      await updateDoc(doc(db, 'super_admin_invitations', invDoc.id), {
+                        status: 'accepted',
+                        acceptedAt: new Date().toISOString()
+                      });
+                    } catch {}
                   }
                 }
-              } catch {}
-
-              if (!isInvitedSuperAdmin) {
-                try {
-                  const qInv = query(
-                    collection(db, 'super_admin_invitations'),
-                    where('email', '==', userEmail)
-                  );
-                  const snapInv = await getDocs(qInv);
-                  if (!snapInv.empty) {
-                    const inv = snapInv.docs[0].data();
-                    if (inv.status !== 'revoked') {
-                      isInvitedSuperAdmin = true;
-                      invitedName = inv.name || '';
-                      if (inv.status === 'pending') {
-                        try {
-                          await updateDoc(doc(db, 'super_admin_invitations', snapInv.docs[0].id), {
-                            status: 'accepted',
-                            acceptedAt: new Date().toISOString()
-                          });
-                        } catch {}
-                      }
-                    }
-                  }
-                } catch {}
+              } catch (invErr) {
+                console.warn('Super admin invitation query warning:', invErr);
               }
 
               if (isInvitedSuperAdmin) {
@@ -619,32 +588,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // 3. If NOT found in `users` and user intended to log in specifically as Staff/Admin, auto-provision
-          if (intendedRole === 'staff' || intendedRole === 'admin' || window.location.pathname.includes('/admin')) {
-            const targetSlug = getUrlTargetRestaurantSlug() || DEFAULT_RESTAURANT_ID || 'bela-italia';
-            const defaultStaffUser: User = {
-              id: firebaseUser.uid,
-              authUid: firebaseUser.uid,
-              email: userEmail,
-              name: firebaseUser.displayName || userEmail.split('@')[0] || 'Administrator',
-              role: intendedRole === 'admin' ? 'admin' : 'staff',
-              status: 'active',
-              restaurantId: targetSlug,
-              restaurantIds: [targetSlug],
-              authProvider: currentAuthProvider,
-              createdAt: new Date().toISOString(),
-            };
-            try {
-              await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...defaultStaffUser,
-                createdAt: serverTimestamp(),
-              }, { merge: true });
-            } catch (e) {}
-            updateUserWithCache(defaultStaffUser);
-            localStorage.removeItem('intendedRole');
-            setLoading(false);
-            return;
-          }
+          // 3. Unprivileged or unregistered users must NEVER be auto-provisioned as staff or admin.
+          localStorage.removeItem('intendedRole');
 
           // 4. CUSTOMER AUTHENTICATION (Google or Email)
           if (isEmailProvider && !firebaseUser.emailVerified) {
@@ -906,17 +851,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const isAssistanceMode = typeof window !== 'undefined' && (new URLSearchParams(window.location.search).get('assistance_mode') === 'true' || sessionStorage.getItem('assistance_mode') === 'true');
-  const isSuperAdmin = isUserSuperAdmin(user) || isAssistanceMode;
-  const isAdmin = isSuperAdmin || isAssistanceMode || (
+  const isSuperAdmin = isUserSuperAdmin(user);
+  const isAdmin = isSuperAdmin || (
     Boolean(user?.restaurantId || (user?.restaurantIds && user.restaurantIds.length > 0)) &&
     (user?.role === 'admin' || user?.role === 'restaurant_owner' || user?.role === 'restaurant_manager')
   );
-  const isStaff = isSuperAdmin || isAssistanceMode || (
+  const isStaff = isSuperAdmin || (
     Boolean(user?.restaurantId || (user?.restaurantIds && user.restaurantIds.length > 0)) &&
     (user?.role === 'staff' || user?.role === 'restaurant_staff' || isAdmin)
   );
-  const isCustomer = user?.role === 'customer' && !isAdmin && !isStaff && !isAssistanceMode;
+  const isCustomer = Boolean(user && user.role === 'customer' && !isAdmin && !isStaff);
 
   return (
     <AuthContext.Provider value={{ 
