@@ -3,7 +3,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { Lock, Unlock, AlertCircle } from 'lucide-react';
-import { cn, getOptimizedUrl } from '../lib/utils';
+import { cn, getOptimizedUrl, isPlatformHost, isTenantSubdomain } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function FreezeOverlay() {
@@ -24,8 +24,35 @@ export function FreezeOverlay() {
   // Support either appUnlockPin or pdfPassword
   const correctPassword = (settings?.appUnlockPin || settings?.pdfPassword || '').trim();
 
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const search = typeof window !== 'undefined' ? window.location.search : '';
+  const searchParams = new URLSearchParams(search);
+  const isExplicitBooking = searchParams.get('view') === 'booking' || searchParams.has('restaurant');
+  const isPreviewMarketing = searchParams.get('preview') === 'true';
+  const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+  const isPlatform = isPlatformHost(host);
+  const isSubdomain = isTenantSubdomain(host);
+
+  const isPlatformLanding = 
+    pathname === '/marketing' || 
+    isPreviewMarketing ||
+    pathname === '/about' ||
+    pathname === '/features' ||
+    pathname === '/services' ||
+    pathname === '/pricing' ||
+    pathname === '/reviews' ||
+    pathname === '/contact' ||
+    pathname === '/register' ||
+    (pathname === '/' && !isPlatform && !isSubdomain && !isExplicitBooking);
+
+  const isSuperAdmin = pathname.startsWith('/app/super-admin');
+  const isLogin = pathname === '/login';
+  const isRestaurantContext = (pathname.startsWith('/admin') || pathname.startsWith('/r/')) && !pathname.includes('/marketing');
+
+  const shouldRunFreeze = isRestaurantContext && !isPlatformLanding && !isSuperAdmin && !isLogin && freezeEnabled && isStaff;
+
   useEffect(() => {
-    if (!freezeEnabled || !isStaff) {
+    if (!shouldRunFreeze) {
       setIsFrozen(false);
       return;
     }
@@ -64,7 +91,7 @@ export function FreezeOverlay() {
       });
       clearInterval(interval);
     };
-  }, [freezeEnabled, isStaff, freezeTimeMs, correctPassword]);
+  }, [shouldRunFreeze, freezeTimeMs, correctPassword]);
 
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +107,7 @@ export function FreezeOverlay() {
     }
   };
 
-  if (!freezeEnabled || !isStaff || !isFrozen) return null;
+  if (!shouldRunFreeze || !isFrozen) return null;
 
   return (
     <AnimatePresence>

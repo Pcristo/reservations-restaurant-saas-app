@@ -40,14 +40,24 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [scrollY, setScrollY] = useState(0);
+  const [activeDashboardImg, setActiveDashboardImg] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveDashboardImg(prev => (prev + 1) % 3);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleScrollTo = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
     setMobileMenuOpen(false);
-    const element = document.getElementById(targetId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    setTimeout(() => {
+      const element = document.getElementById(targetId);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 120);
   };
 
   useEffect(() => {
@@ -291,8 +301,14 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
     return p.description;
   };
 
+  const dashboardImages = [
+    '/assets/images/dashboard/app_dashboard_1.png',
+    '/assets/images/dashboard/app_dashboard_2.png',
+    '/assets/images/dashboard/app_dashboard_3.png'
+  ];
+
   const renderLiveServiceMockup = () => (
-    <div className="rounded-xl overflow-hidden border border-slate-800/80 bg-slate-950">
+    <div className="rounded-xl overflow-hidden border border-slate-800/80 bg-slate-950 shadow-2xl">
       {/* Mock Browser Header */}
       <div className="h-9 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -309,128 +325,74 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
         </div>
       </div>
 
-      {/* Mock Live Service Floor Grid */}
-      <div className="p-6 md:p-8 bg-slate-950 text-left grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left Column: Live Service Shift Stats */}
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800">
-            <div className="text-xs text-slate-400">
-              {isPt ? 'Turno de Jantar de Hoje' : "Tonight's Dinner Shift"}
-            </div>
-            <div className="text-2xl font-bold text-white mt-1">
-              48 / 60 {isPt ? 'Clientes' : 'Covers'}
-            </div>
-            <div className="w-full bg-slate-800 h-2 rounded-full mt-3 overflow-hidden">
-              <div className="bg-amber-500 h-full rounded-full w-[80%]" />
-            </div>
-            <div className="flex justify-between text-[11px] text-slate-400 mt-2">
-              <span>{isPt ? '80% Capacidade Ocupada' : '80% Seated Capacity'}</span>
-              <span className="text-amber-400 font-semibold">
-                {isPt ? '12 Lugares Livres' : '12 Covers Open'}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2.5">
-            <div className="text-xs font-semibold text-slate-300">
-              {isPt ? 'Próximas Chegadas' : 'Upcoming Arrivals'}
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs">
-              <div>
-                <div className="font-semibold text-white">Oliver Vance (4p)</div>
-                <div className="text-[11px] text-slate-400">
-                  {isPt ? 'Mesa 4 • Esplanada' : 'Table 4 • Patio Room'}
+      {/* Carousel Inside Browser Frame */}
+      <div className="relative bg-slate-950 p-3 sm:p-6 min-h-[380px] sm:min-h-[480px] flex items-center justify-center">
+        <div className="relative w-full overflow-hidden rounded-xl border border-slate-800 bg-slate-900 shadow-inner">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeDashboardImg}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4, ease: 'easeInOut' }}
+              className="relative w-full h-[320px] sm:h-[460px] flex items-center justify-center bg-slate-900"
+            >
+              <img
+                src={dashboardImages[activeDashboardImg]}
+                alt={`DineMaster Pro Dashboard ${activeDashboardImg + 1}`}
+                className="w-full h-full object-contain bg-slate-950/40"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+                referrerPolicy="no-referrer"
+              />
+              {/* Image Overlay reduced to 0.05 */}
+              <div className="absolute inset-0 bg-slate-950/5 pointer-events-none" />
+              {/* Fallback graphic if image is empty */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/85 text-center p-6 pointer-events-none">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 shadow-md">
+                  <LayoutGrid size={24} />
+                </div>
+                <div className="text-sm font-bold text-white mb-1">
+                  {activeDashboardImg === 0 
+                    ? (isPt ? 'Painel de Controlo & Gestão em Tempo Real' : 'Real-time Operations & Floor Control') 
+                    : activeDashboardImg === 1 
+                    ? (isPt ? 'Visão de Mesas & Ocupação' : 'Table Status & Live Cover Tracking')
+                    : (isPt ? 'Gestão de Clientes & Reservas' : 'Guest Relations & Reservation Hub')}
+                </div>
+                <div className="text-xs text-slate-400 max-w-sm">
+                  {isPt ? 'Sistema operacional inteligente para restaurantes modernos.' : 'One intelligent operating system built for modern restaurants.'}
                 </div>
               </div>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] font-bold">
-                19:30
-              </span>
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs">
-              <div>
-                <div className="font-semibold text-white">Elena Rostova (2p)</div>
-                <div className="text-[11px] text-slate-400">
-                  {isPt ? 'Mesa 1 • Sala Principal' : 'Table 1 • Main Dining'}
-                </div>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono text-[10px] font-bold">
-                19:45
-              </span>
-            </div>
-          </div>
-        </div>
+            </motion.div>
+          </AnimatePresence>
 
-        {/* Middle & Right: Interactive Floor Layout */}
-        <div className="md:col-span-2 p-5 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-              <div className="text-xs font-bold text-white flex items-center gap-2">
-                <LayoutGrid size={14} className="text-amber-400" />
-                <span>{isPt ? 'Sala Principal & Esplanada (Tempo Real)' : 'Main Dining Room & Terrace (Live Status)'}</span>
-              </div>
-              <div className="flex items-center gap-3 text-[11px]">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" /> {isPt ? 'Disponível' : 'Available'}
-                </span>
-                <span className="flex items-center gap-1 text-amber-400">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" /> {isPt ? 'Reservada' : 'Reserved'}
-                </span>
-                <span className="flex items-center gap-1 text-rose-400">
-                  <span className="w-2 h-2 rounded-full bg-rose-400" /> {isPt ? 'Ocupada' : 'Seated'}
-                </span>
-              </div>
+          {/* Carousel Navigation Controls */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-4 z-20 bg-slate-950/85 backdrop-blur-md px-5 py-2.5 rounded-full border border-slate-800 shadow-xl">
+            <button
+              onClick={() => setActiveDashboardImg(prev => (prev - 1 + dashboardImages.length) % dashboardImages.length)}
+              className="text-xs font-bold text-slate-300 hover:text-white px-2 py-1 cursor-pointer transition-colors"
+            >
+              ‹ {isPt ? 'Anterior' : 'Prev'}
+            </button>
+            <div className="flex items-center gap-1.5">
+              {dashboardImages.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveDashboardImg(idx)}
+                  className={cn(
+                    "w-2 h-2 rounded-full transition-all cursor-pointer",
+                    activeDashboardImg === idx ? "bg-amber-500 w-6" : "bg-slate-700 hover:bg-slate-500"
+                  )}
+                />
+              ))}
             </div>
-
-            {/* Mock Table Layout */}
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-              <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-center">
-                <div className="text-[10px] font-mono text-emerald-400 font-bold">T-01 (2p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Disponível' : 'Available'}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{isPt ? 'Vista Janela' : 'Window View'}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-rose-950/20 border border-rose-500/40 text-center">
-                <div className="text-[10px] font-mono text-rose-400 font-bold">T-02 (4p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Ocupada • 42m' : 'Seated • 42m'}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">M. Rossi (4)</div>
-              </div>
-              <div className="p-3 rounded-lg bg-amber-950/20 border border-amber-500/40 text-center">
-                <div className="text-[10px] font-mono text-amber-400 font-bold">T-03 (6p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Reservada' : 'Reserved'}</div>
-                <div className="text-[10px] text-amber-300 mt-0.5">{isPt ? 'Chega em 15m' : 'Due in 15m'}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-rose-950/20 border border-rose-500/40 text-center">
-                <div className="text-[10px] font-mono text-rose-400 font-bold">T-04 (2p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Ocupada • 18m' : 'Seated • 18m'}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">Mesa VIP</div>
-              </div>
-              <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-center">
-                <div className="text-[10px] font-mono text-emerald-400 font-bold">T-05 (4p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Disponível' : 'Available'}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{isPt ? 'Sala Central' : 'Main Floor'}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-center">
-                <div className="text-[10px] font-mono text-emerald-400 font-bold">T-06 (4p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Disponível' : 'Available'}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{isPt ? 'Sala Central' : 'Main Floor'}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-amber-950/20 border border-amber-500/40 text-center">
-                <div className="text-[10px] font-mono text-amber-400 font-bold">T-07 (8p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Reservada' : 'Reserved'}</div>
-                <div className="text-[10px] text-amber-300 mt-0.5">{isPt ? 'Às 20:00' : 'Due at 20:00'}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-center">
-                <div className="text-[10px] font-mono text-emerald-400 font-bold">T-08 (2p)</div>
-                <div className="text-xs text-white font-semibold mt-1">{isPt ? 'Disponível' : 'Available'}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{isPt ? 'Canto Calmo' : 'Quiet Corner'}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-            <span>{isPt ? 'Sincronização offline ativa' : 'Offline-first database sync active'}</span>
-            <span className="text-amber-400 font-mono font-medium">
-              {isPt ? 'Sincronizado há < 1s' : 'Synced < 1s ago'}
-            </span>
+            <button
+              onClick={() => setActiveDashboardImg(prev => (prev + 1) % dashboardImages.length)}
+              className="text-xs font-bold text-slate-300 hover:text-white px-2 py-1 cursor-pointer transition-colors"
+            >
+              {isPt ? 'Seguinte' : 'Next'} ›
+            </button>
           </div>
         </div>
       </div>
@@ -581,13 +543,13 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="md:hidden overflow-hidden border-b border-slate-800 bg-slate-950 px-4 pt-3 pb-6 space-y-3"
+              className="md:hidden overflow-hidden border-b border-slate-800 bg-slate-950 px-4 pt-3 pb-6 space-y-3 z-50 relative"
             >
             {settings.about?.enabled !== false && (
               <a 
                 href="#about" 
                 onClick={(e) => handleScrollTo(e, 'about')}
-                className="block py-2 text-sm text-slate-300 hover:text-white"
+                className="block py-2 text-sm text-slate-300 hover:text-white cursor-pointer"
               >
                 {isPt ? 'Como Funciona' : 'How It Works'}
               </a>
@@ -595,7 +557,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             <a 
               href="#features" 
               onClick={(e) => handleScrollTo(e, 'features')}
-              className="block py-2 text-sm text-slate-300 hover:text-white"
+              className="block py-2 text-sm text-slate-300 hover:text-white cursor-pointer"
             >
               {isPt ? 'Funcionalidades' : 'Features'}
             </a>
@@ -603,7 +565,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <a 
                 href="#reviews" 
                 onClick={(e) => handleScrollTo(e, 'reviews')}
-                className="block py-2 text-sm text-slate-300 hover:text-white"
+                className="block py-2 text-sm text-slate-300 hover:text-white cursor-pointer"
               >
                 {isPt ? 'Avaliações' : 'Reviews'}
               </a>
@@ -612,7 +574,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <a 
                 href="#pricing" 
                 onClick={(e) => handleScrollTo(e, 'pricing')}
-                className="block py-2 text-sm text-slate-300 hover:text-white"
+                className="block py-2 text-sm text-slate-300 hover:text-white cursor-pointer"
               >
                 {isPt ? 'Preços' : 'Pricing'}
               </a>
@@ -621,7 +583,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <a 
                 href="#contact" 
                 onClick={(e) => handleScrollTo(e, 'contact')}
-                className="block py-2 text-sm text-slate-300 hover:text-white"
+                className="block py-2 text-sm text-slate-300 hover:text-white cursor-pointer"
               >
                 {isPt ? 'Contacto' : 'Contact'}
               </a>
@@ -636,7 +598,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                 <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800">
                   <button
                     type="button"
-                    onClick={() => { setLanguage('en'); setMobileMenuOpen(false); }}
+                    onClick={() => { setLanguage('en'); setTimeout(() => setMobileMenuOpen(false), 150); }}
                     className={cn(
                       "px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer",
                       language === 'en'
@@ -648,7 +610,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setLanguage('pt'); setMobileMenuOpen(false); }}
+                    onClick={() => { setLanguage('pt'); setTimeout(() => setMobileMenuOpen(false), 150); }}
                     className={cn(
                       "px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer",
                       language === 'pt'
@@ -665,15 +627,15 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             <div className="pt-2 flex flex-col gap-2">
               <Link
                 to="/login"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full py-2.5 text-center text-xs font-semibold bg-slate-900 text-white rounded-lg border border-slate-800 hover:bg-slate-800 transition-colors"
+                onClick={() => setTimeout(() => setMobileMenuOpen(false), 150)}
+                className="w-full py-2.5 text-center text-xs font-semibold bg-slate-900 text-white rounded-lg border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 {isPt ? 'Iniciar Sessão' : 'Login'}
               </Link>
               <a
                 href={settings.general?.primaryCtaUrl || '#pricing'}
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full py-2.5 text-center text-xs font-bold bg-amber-500 text-slate-950 rounded-lg shadow"
+                onClick={() => setTimeout(() => setMobileMenuOpen(false), 150)}
+                className="w-full py-2.5 text-center text-xs font-bold bg-amber-500 text-slate-950 rounded-lg shadow cursor-pointer"
               >
                 {isPt ? 'Começar Grátis' : (settings.general?.primaryCtaText || 'Start Free Trial')}
               </a>

@@ -401,6 +401,26 @@ export async function createManualInvoice(invoiceData: {
   notes?: string;
   selectedPlanId?: string;
 }): Promise<Invoice> {
+  try {
+    const res = await fetch('/api/billing/create-invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(invoiceData),
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.invoice) {
+      try {
+        const existing = localStorage.getItem('dinemaster_invoices_cache');
+        const parsed: Invoice[] = existing ? JSON.parse(existing) : [];
+        parsed.unshift(data.invoice);
+        localStorage.setItem('dinemaster_invoices_cache', JSON.stringify(parsed));
+      } catch {}
+      return data.invoice;
+    }
+  } catch (err) {
+    console.warn('[billingService] API createInvoice failed, falling back to local creation:', err);
+  }
+
   const invoiceId = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const subtotal = Number(invoiceData.amount) || 0;
   const taxRate = 23;
