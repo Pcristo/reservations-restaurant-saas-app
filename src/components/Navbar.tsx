@@ -180,7 +180,18 @@ export default function Navbar() {
   const isMasterAdminEmail = (user?.email || '').toLowerCase().trim() === 'pcristo35@gmail.com';
   const hasSuperAdminPrivileges = isSuperAdmin || isMasterAdminEmail;
 
-  const navLinks = [
+  interface NavLinkItem {
+    name: string;
+    path: string;
+    public?: boolean;
+    external?: boolean;
+    customer?: boolean;
+    admin?: boolean;
+    staff?: boolean;
+    superAdmin?: boolean;
+  }
+
+  const navLinks: NavLinkItem[] = [
     { name: t('nav.book'), path: restaurantBookingUrl, public: true },
     { name: t('nav.website'), path: settings?.websiteUrl || '#', public: true, external: true },
     { name: t('nav.my_bookings'), path: '/my-bookings', customer: true },
@@ -188,10 +199,9 @@ export default function Navbar() {
     { name: t('nav.live_view'), path: `${adminBase}/live`, admin: true, staff: true },
     { name: t('nav.reservations'), path: `${adminBase}/reservations`, admin: true, staff: true },
     { name: t('nav.customers'), path: `${adminBase}/customers`, admin: true, staff: true },
-    { name: 'Super Admin', path: '/app/super-admin', superAdmin: true },
   ];
 
-  const filteredLinks = navLinks.filter(link => {
+  const filteredLinks = navLinks.filter((link: NavLinkItem) => {
     if (link.external && (!settings?.websiteUrl || settings.websiteUrl === '#')) return false;
     if (link.path === restaurantBookingUrl && (isAdmin || isStaff)) return false;
     if (link.public) return true;
@@ -237,17 +247,6 @@ export default function Navbar() {
                     <span className="text-[9px] font-mono opacity-80">(/r/{restaurantSlug})</span>
                   )}
                 </span>
-              )}
-              {hasSuperAdminPrivileges && (
-                <Link
-                  to="/app/super-admin"
-                  id="topbar-super-admin-link"
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500 hover:text-slate-950 transition-all font-bold text-[10px] normal-case tracking-normal shadow-sm"
-                  title="Platform Super Administrator Portal"
-                >
-                  <ShieldAlert size={12} className="text-amber-400" />
-                  <span>Super Admin Panel</span>
-                </Link>
               )}
             </div>
             <div className="flex items-center gap-6">
@@ -532,17 +531,7 @@ export default function Navbar() {
             
             {user ? (
               <div className="flex items-center gap-2">
-                {hasSuperAdminPrivileges && (
-                  <Link
-                    to="/app/super-admin"
-                    id="btn-navbar-superadmin-action"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-sm transition-all cursor-pointer"
-                    title="Platform Super Administrator Portal"
-                  >
-                    <ShieldAlert size={14} className="text-slate-950" />
-                    <span>Super Admin</span>
-                  </Link>
-                )}
+              {/* Super Admin button removed */}
                 <button
                   onClick={(e) => handleNavigationAttempt(e, undefined, logout)}
                   className={cn(

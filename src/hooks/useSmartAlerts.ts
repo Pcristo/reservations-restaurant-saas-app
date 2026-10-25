@@ -417,47 +417,20 @@ export function useSmartAlerts() {
     return computedAlerts;
   }, [isAuthorizedForCurrentRestaurant, reservations, tables, settings, language]);
 
-  // Combine Firestore persistent/custom alerts with dynamic alerts and apply statuses
-  const allAlerts = useMemo(() => {
-    const firestoreMap = new Map<string, SmartAlert>();
-    firestoreAlerts.forEach(a => {
-      firestoreMap.set(a.fingerprint || a.id, a);
-    });
-
-    const combined: SmartAlert[] = [];
-    const addedFingerprints = new Set<string>();
-
-    dynamicAlerts.forEach(dynAlert => {
-      const key = dynAlert.fingerprint || dynAlert.id;
-      addedFingerprints.add(key);
-
-      const existing = firestoreMap.get(key);
-      if (existing) {
-        combined.push({
-          ...dynAlert,
-          status: existing.status,
-          dismissedAt: existing.dismissedAt,
-          dismissedBy: existing.dismissedBy,
-          resolvedAt: (existing as any).resolvedAt,
-          resolvedBy: (existing as any).resolvedBy
-        });
-      } else {
-        combined.push(dynAlert);
-      }
-    });
-
-    firestoreAlerts.forEach(fsAlert => {
-      const key = fsAlert.fingerprint || fsAlert.id;
-      if (!addedFingerprints.has(key)) {
-        combined.push(fsAlert);
-      }
-    });
-
-    return combined;
-  }, [dynamicAlerts, firestoreAlerts]);
+  const updateLocalStatus = (alertId: string, status: 'dismissed' | 'resolved') => {
+    try {
+      const storageKey = `smart_alerts_status_${targetRestaurantId}`;
+      const saved = localStorage.getItem(storageKey);
+      const overrides = saved ? JSON.parse(saved) : {};
+      overrides[alertId] = status;
+      localStorage.setItem(storageKey, JSON.stringify(overrides));
+    } catch {}
+  };
 
   const deleteAlert = useCallback(async (alertId: string) => {
     if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
+    updateLocalStatus(alertId, 'dismissed');
+    setFirestoreAlerts(prev => prev.filter(a => (a.fingerprint || a.id) !== alertId));
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
@@ -470,19 +443,42 @@ export function useSmartAlerts() {
 
   const dismissAlert = useCallback(async (alertId: string) => {
     if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
+    const now = new Date().toISOString();
+    updateLocalStatus(alertId, 'dismissed');
+    
+    // Optimistic local update
+    setFirestoreAlerts(prev => {
+      const existing = prev.find(a => (a.fingerprint || a.id) === alertId || a.id === alertId || a.fingerprint === alertId);
+      if (existing) {
+        return prev.map(a => (a.fingerprint || a.id) === alertId || a.id === alertId || a.fingerprint === alertId ? { ...a, status: 'dismissed' as const, dismissedAt: now } : a);
+      }
+      return [...prev, {
+        id: alertId,
+        restaurantId: targetRestaurantId,
+        type: 'custom',
+        title: 'Dismissed Alert',
+        message: '',
+        severity: 'low',
+        status: 'dismissed' as const,
+        relatedReservationIds: [],
+        fingerprint: alertId,
+        createdAt: now,
+        dismissedAt: now
+      }];
+    });
+
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
       const alertRef = doc(db, `smart_alerts`, scopedId);
-      const now = new Date();
-      const expires = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      const expires = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
       
       await setDoc(alertRef, {
         id: scopedId,
         restaurantId: targetRestaurantId,
         fingerprint: alertId,
         status: 'dismissed',
-        dismissedAt: now.toISOString(),
+        dismissedAt: now,
         dismissedBy: auth.currentUser.uid,
         expiresAt: expires
       }, { merge: true });
@@ -493,19 +489,42 @@ export function useSmartAlerts() {
 
   const resolveAlert = useCallback(async (alertId: string) => {
     if (!auth.currentUser || !isAuthorizedForCurrentRestaurant) return;
+    const now = new Date().toISOString();
+    updateLocalStatus(alertId, 'resolved');
+
+    // Optimistic local update
+    setFirestoreAlerts(prev => {
+      const existing = prev.find(a => (a.fingerprint || a.id) === alertId || a.id === alertId || a.fingerprint === alertId);
+      if (existing) {
+        return prev.map(a => (a.fingerprint || a.id) === alertId || a.id === alertId || a.fingerprint === alertId ? { ...a, status: 'resolved' as const, resolvedAt: now } : a);
+      }
+      return [...prev, {
+        id: alertId,
+        restaurantId: targetRestaurantId,
+        type: 'custom',
+        title: 'Resolved Alert',
+        message: '',
+        severity: 'low',
+        status: 'resolved' as const,
+        relatedReservationIds: [],
+        fingerprint: alertId,
+        createdAt: now,
+        resolvedAt: now
+      }];
+    });
+
     try {
       const safeId = encodeURIComponent(alertId).replace(/\./g, '_').replace(/%/g, '_');
       const scopedId = `${targetRestaurantId}_${safeId}`;
       const alertRef = doc(db, `smart_alerts`, scopedId);
-      const now = new Date();
-      const expires = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      const expires = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
       
       await setDoc(alertRef, {
         id: scopedId,
         restaurantId: targetRestaurantId,
         fingerprint: alertId,
         status: 'resolved',
-        resolvedAt: now.toISOString(),
+        resolvedAt: now,
         resolvedBy: auth.currentUser.uid,
         expiresAt: expires
       }, { merge: true });
@@ -513,6 +532,59 @@ export function useSmartAlerts() {
       handleFirestoreError(e, OperationType.UPDATE, `smart_alerts/${alertId}`);
     }
   }, [targetRestaurantId, isAuthorizedForCurrentRestaurant]);
+
+  // Combine Firestore persistent/custom alerts with dynamic alerts and apply statuses
+  const allAlerts = useMemo(() => {
+    const firestoreMap = new Map<string, SmartAlert>();
+    firestoreAlerts.forEach(a => {
+      if (a.fingerprint) firestoreMap.set(a.fingerprint, a);
+      if (a.id) firestoreMap.set(a.id, a);
+    });
+
+    let localOverrides: Record<string, string> = {};
+    try {
+      const saved = localStorage.getItem(`smart_alerts_status_${targetRestaurantId}`);
+      if (saved) localOverrides = JSON.parse(saved);
+    } catch {}
+
+    const combined: SmartAlert[] = [];
+    const addedFingerprints = new Set<string>();
+
+    dynamicAlerts.forEach(dynAlert => {
+      const key = dynAlert.fingerprint || dynAlert.id;
+      addedFingerprints.add(key);
+
+      const localStatus = localOverrides[key] || localOverrides[dynAlert.id] || localOverrides[dynAlert.fingerprint || ''];
+      const existing = firestoreMap.get(key) || firestoreMap.get(dynAlert.id) || firestoreMap.get(dynAlert.fingerprint || '');
+
+      const status = localStatus || existing?.status || dynAlert.status;
+
+      if (existing || localStatus) {
+        combined.push({
+          ...dynAlert,
+          status: status as any,
+          dismissedAt: existing?.dismissedAt || (localStatus === 'dismissed' ? new Date().toISOString() : undefined),
+          resolvedAt: (existing as any)?.resolvedAt || (localStatus === 'resolved' ? new Date().toISOString() : undefined),
+        });
+      } else {
+        combined.push(dynAlert);
+      }
+    });
+
+    firestoreAlerts.forEach(fsAlert => {
+      const key = fsAlert.fingerprint || fsAlert.id;
+      if (!addedFingerprints.has(key)) {
+        const localStatus = localOverrides[key] || localOverrides[fsAlert.id] || localOverrides[fsAlert.fingerprint || ''];
+        combined.push({
+          ...fsAlert,
+          status: (localStatus || fsAlert.status) as any
+        });
+      }
+    });
+
+    return combined;
+  }, [dynamicAlerts, firestoreAlerts, targetRestaurantId]);
+
 
   const activeAlerts = useMemo(() => {
     return allAlerts

@@ -5,11 +5,12 @@ import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { format, parseISO, addDays } from 'date-fns';
-import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard, CheckCircle2, LifeBuoy } from 'lucide-react';
+import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard, CheckCircle2, LifeBuoy, Volume2, VolumeX, Play } from 'lucide-react';
 import { useReservations } from '../hooks/useReservations';
 import { useCustomers } from '../hooks/useCustomers';
 import { DAYS_OF_WEEK } from '../constants';
 import { cn, getOptimizedUrl, formatDisplayTime, findSpecialScheduleConflicts } from '../lib/utils';
+import { playNotificationSound } from '../lib/notificationSounds';
 import { SpecialSchedule } from '../types';
 import CustomDropdown from '../components/CustomDropdown';
 import { AppDatePicker } from '../components/AppDatePicker';
@@ -85,6 +86,21 @@ export default function AdminSettings() {
   const [selectedHistoryDataType, setSelectedHistoryDataType] = useState<string>('all');
   const [dataHistoryPassInput, setDataHistoryPassInput] = useState('');
   const [showModalDataHistoryPass, setShowModalDataHistoryPass] = useState(false);
+  const [playingSound, setPlayingSound] = useState<string | null>(null);
+
+  const handlePreviewSound = async (soundKey: 'chime' | 'light_beep') => {
+    setPlayingSound(soundKey);
+    try {
+      await playNotificationSound(soundKey);
+    } finally {
+      setTimeout(() => setPlayingSound(null), 500);
+    }
+  };
+
+  const handleSelectSound = (soundKey: 'chime' | 'light_beep') => {
+    setFormData((prev: any) => ({ ...prev, bellSound: soundKey }));
+    handlePreviewSound(soundKey);
+  };
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -686,6 +702,14 @@ export default function AdminSettings() {
           >
             <ImageIcon size={14} />
             <span>Photos & Gallery</span>
+          </button>
+          
+          <button
+            onClick={() => navigate(`${adminBase}/assistance`)}
+            className="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer bg-amber-600 text-white hover:bg-amber-700"
+          >
+            <LifeBuoy size={14} />
+            <span>{language === 'pt' ? 'Assistência' : 'Assistance'}</span>
           </button>
           <button
             onClick={() => navigate(`${adminBase}/billing`)}
@@ -1942,31 +1966,198 @@ export default function AdminSettings() {
               )}
 
               <div className={cn(
-                "flex items-center justify-between p-4 rounded-xl border mt-3 transition-colors duration-300",
+                "p-4 rounded-xl border mt-3 transition-colors duration-300",
                 settings?.theme === 'dark' ? "bg-amber-900/10 border-amber-900/50" : "bg-amber-50/50 border-amber-100"
               )}>
-                <div>
-                  <h3 className={cn(
-                    "text-sm font-bold transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-amber-400" : "text-amber-900"
-                  )}>{t('settings.silent_bell')}</h3>
-                  <p className={cn(
-                    "text-[10px] transition-colors duration-300",
-                    settings?.theme === 'dark' ? "text-amber-500/80" : "text-amber-700"
-                  )}>{t('settings.silent_bell_desc')}</p>
+                {/* Top: Silent Bell toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "p-2 rounded-lg mt-0.5",
+                      settings?.theme === 'dark' ? "bg-amber-950/60 text-amber-400" : "bg-amber-100 text-amber-800"
+                    )}>
+                      {formData.silentBell ? <VolumeX size={18} /> : <Bell size={18} />}
+                    </div>
+                    <div>
+                      <h3 className={cn(
+                        "text-sm font-bold transition-colors duration-300",
+                        settings?.theme === 'dark' ? "text-amber-400" : "text-amber-900"
+                      )}>{t('settings.silent_bell')}</h3>
+                      <p className={cn(
+                        "text-[10px] transition-colors duration-300",
+                        settings?.theme === 'dark' ? "text-amber-500/80" : "text-amber-700"
+                      )}>{t('settings.silent_bell_desc')}</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={formData.silentBell ?? false} 
+                      onChange={(e) => setFormData({ ...formData, silentBell: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className={cn(
+                      "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600",
+                      settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-amber-900" : "bg-gray-200 peer-focus:ring-amber-300"
+                    )}></div>
+                  </label>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={formData.silentBell ?? false} 
-                    onChange={(e) => setFormData({ ...formData, silentBell: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className={cn(
-                    "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600",
-                    settings?.theme === 'dark' ? "bg-gray-800 peer-focus:ring-amber-900" : "bg-gray-200 peer-focus:ring-amber-300"
-                  )}></div>
-                </label>
+
+                {/* Bottom: Choose the Bell Sound */}
+                <div className={cn(
+                  "mt-4 pt-3.5 border-t",
+                  settings?.theme === 'dark' ? "border-amber-900/40" : "border-amber-200/70"
+                )}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Volume2 size={15} className={settings?.theme === 'dark' ? "text-amber-400" : "text-amber-800"} />
+                      <span className={cn(
+                        "text-xs font-bold uppercase tracking-wider",
+                        settings?.theme === 'dark' ? "text-amber-300" : "text-amber-900"
+                      )}>
+                        {t('settings.bell_sound_title')}
+                      </span>
+                    </div>
+                    {Boolean(formData.silentBell) && (
+                      <span className={cn(
+                        "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                        settings?.theme === 'dark' ? "bg-amber-950/80 text-amber-400 border border-amber-800/60" : "bg-amber-200/70 text-amber-900"
+                      )}>
+                        {t('settings.bell_sound_muted_hint')}
+                      </span>
+                    )}
+                  </div>
+                  <p className={cn(
+                    "text-[11px] mb-3",
+                    settings?.theme === 'dark' ? "text-amber-400/80" : "text-amber-800/80"
+                  )}>
+                    {t('settings.bell_sound_desc')}
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Sound 1: Classic Bell / Chime */}
+                    <div 
+                      onClick={() => handleSelectSound('chime')}
+                      className={cn(
+                        "flex items-start p-3.5 rounded-xl border cursor-pointer transition-all duration-200 select-none",
+                        (formData.bellSound || 'chime') === 'chime'
+                          ? (settings?.theme === 'dark'
+                              ? "bg-amber-500/15 border-amber-500/60 shadow-sm ring-1 ring-amber-500/30"
+                              : "bg-white border-amber-400 shadow-sm ring-1 ring-amber-300/60")
+                          : (settings?.theme === 'dark'
+                              ? "bg-gray-900/40 border-gray-800 hover:border-amber-900/60"
+                              : "bg-white/70 border-gray-200 hover:border-amber-300")
+                      )}
+                    >
+                      {/* Left: Checkbox with icon-only listen button directly under it */}
+                      <div className="flex flex-col items-center justify-center gap-2 shrink-0 pt-0.5">
+                        <input
+                          type="checkbox"
+                          checked={(formData.bellSound || 'chime') === 'chime'}
+                          onChange={() => handleSelectSound('chime')}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePreviewSound('chime');
+                          }}
+                          className={cn(
+                            "w-7 h-7 flex items-center justify-center rounded-lg border transition-all cursor-pointer",
+                            playingSound === 'chime'
+                              ? "bg-amber-500 text-white border-amber-600 scale-95 ring-2 ring-amber-400/50"
+                              : (settings?.theme === 'dark'
+                                  ? "bg-amber-950/70 hover:bg-amber-900/70 text-amber-300 border-amber-800/60"
+                                  : "bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300/80")
+                          )}
+                          title={t('settings.listen_sound')}
+                          aria-label={t('settings.listen_sound')}
+                        >
+                          <Volume2 size={14} className={playingSound === 'chime' ? "animate-pulse" : ""} />
+                        </button>
+                      </div>
+
+                      {/* Right: Rest of space for text */}
+                      <div className="flex-1 min-w-0 pl-3">
+                        <div className={cn(
+                          "text-xs font-bold leading-tight",
+                          settings?.theme === 'dark' ? "text-amber-200" : "text-amber-950"
+                        )}>
+                          {t('settings.sound_chime')}
+                        </div>
+                        <div className={cn(
+                          "text-[11px] leading-snug mt-1",
+                          settings?.theme === 'dark' ? "text-amber-400/70" : "text-amber-800/80"
+                        )}>
+                          {t('settings.sound_chime_desc')}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Sound 2: Light Beep ("bip") */}
+                    <div 
+                      onClick={() => handleSelectSound('light_beep')}
+                      className={cn(
+                        "flex items-start p-3.5 rounded-xl border cursor-pointer transition-all duration-200 select-none",
+                        formData.bellSound === 'light_beep'
+                          ? (settings?.theme === 'dark'
+                              ? "bg-amber-500/15 border-amber-500/60 shadow-sm ring-1 ring-amber-500/30"
+                              : "bg-white border-amber-400 shadow-sm ring-1 ring-amber-300/60")
+                          : (settings?.theme === 'dark'
+                              ? "bg-gray-900/40 border-gray-800 hover:border-amber-900/60"
+                              : "bg-white/70 border-gray-200 hover:border-amber-300")
+                      )}
+                    >
+                      {/* Left: Checkbox with icon-only listen button directly under it */}
+                      <div className="flex flex-col items-center justify-center gap-2 shrink-0 pt-0.5">
+                        <input
+                          type="checkbox"
+                          checked={formData.bellSound === 'light_beep'}
+                          onChange={() => handleSelectSound('light_beep')}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePreviewSound('light_beep');
+                          }}
+                          className={cn(
+                            "w-7 h-7 flex items-center justify-center rounded-lg border transition-all cursor-pointer",
+                            playingSound === 'light_beep'
+                              ? "bg-amber-500 text-white border-amber-600 scale-95 ring-2 ring-amber-400/50"
+                              : (settings?.theme === 'dark'
+                                  ? "bg-amber-950/70 hover:bg-amber-900/70 text-amber-300 border-amber-800/60"
+                                  : "bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300/80")
+                          )}
+                          title={t('settings.listen_sound')}
+                          aria-label={t('settings.listen_sound')}
+                        >
+                          <Volume2 size={14} className={playingSound === 'light_beep' ? "animate-pulse" : ""} />
+                        </button>
+                      </div>
+
+                      {/* Right: Rest of space for text */}
+                      <div className="flex-1 min-w-0 pl-3">
+                        <div className={cn(
+                          "text-xs font-bold leading-tight",
+                          settings?.theme === 'dark' ? "text-amber-200" : "text-amber-950"
+                        )}>
+                          {t('settings.sound_beep')}
+                        </div>
+                        <div className={cn(
+                          "text-[11px] leading-snug mt-1",
+                          settings?.theme === 'dark' ? "text-amber-400/70" : "text-amber-800/80"
+                        )}>
+                          {t('settings.sound_beep_desc')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className={cn(
@@ -6597,7 +6788,6 @@ const BinCustomersSection = ({ customers, onRestore, onPermanentDelete, onBulkRe
           </table>
         </div>
 
-      {/* Confirmation Modal */}
       {confirmDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={cn(
@@ -6651,6 +6841,7 @@ const BinCustomersSection = ({ customers, onRestore, onPermanentDelete, onBulkRe
           </div>
         </div>
       )}
+
     </div>
   );
-};
+}

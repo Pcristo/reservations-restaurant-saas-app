@@ -180,6 +180,23 @@ export default function Instructions() {
               <li>• <strong>{language === 'pt' ? 'Filtros de Turno:' : 'Shift Filters:'}</strong> {language === 'pt' ? 'Isole reservas específicas por turno de almoço ou jantar.' : 'Isolate specific bookings by lunch or dinner shift.'}</li>
             </ul>
           </div>
+
+          <div className={cn("p-6 rounded-2xl border transition-all", isDark ? "bg-gray-800/50 border-gray-700" : "bg-white border-gray-200")}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-amber-100 text-amber-600 rounded-xl"><Settings size={24} /></div>
+              <h3 className={cn("text-xl font-bold", isDark ? "text-white" : "text-gray-900")}>
+                {language === 'pt' ? 'Pedido de Assistência' : 'Request Assistance'}
+              </h3>
+            </div>
+            <p className={cn("mb-4 text-sm", isDark ? "text-gray-400" : "text-gray-600")}>
+              {language === 'pt' ? 'Suporte técnico e ajuda com a plataforma.' : 'Technical support and platform assistance.'}
+            </p>
+            <ul className={cn("space-y-3 text-sm", isDark ? "text-gray-300" : "text-gray-600")}>
+              <li>• <strong>{language === 'pt' ? 'Acesso Direto:' : 'Direct Access:'}</strong> {language === 'pt' ? 'O administrador do restaurante pode solicitar assistência a qualquer momento.' : 'The restaurant administrator can request technical assistance at any time.'}</li>
+              <li>• <strong>{language === 'pt' ? 'Página de Definições:' : 'Settings Page:'}</strong> {language === 'pt' ? 'A opção de pedido de assistência está localizada diretamente na página de definições do administrador.' : 'The assistance request option is conveniently located directly inside the restaurant admin settings page.'}</li>
+              <li>• <strong>{language === 'pt' ? 'Suporte Prioritário:' : 'Priority Support:'}</strong> {language === 'pt' ? 'Envie dúvidas sobre configuração de mesas, horários ou sincronização.' : 'Send inquiries regarding table configuration, opening hours, or synchronization.'}</li>
+            </ul>
+          </div>
           
         </div>
       </div>

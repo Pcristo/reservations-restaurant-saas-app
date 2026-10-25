@@ -26,6 +26,7 @@ import {
   LifeBuoy
 } from 'lucide-react';
 import { listAllRestaurants, listAllDomains, listAuditLogs } from '../../services/tenantService';
+import { fetchAssistanceRequests, AssistanceRequest } from '../../services/assistanceService';
 import { Restaurant, DomainRecord, AuditLogEntry, MarketingWebsiteSettings } from '../../types';
 import { runMultiTenantMigration, MigrationSummary } from '../../lib/migration';
 import { useNavigate } from 'react-router-dom';
@@ -41,6 +42,7 @@ export const SuperAdminDashboard: React.FC = () => {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [domains, setDomains] = useState<DomainRecord[]>([]);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  const [openAssistanceRequests, setOpenAssistanceRequests] = useState<AssistanceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationResult, setMigrationResult] = useState<MigrationSummary | null>(null);
@@ -59,17 +61,21 @@ export const SuperAdminDashboard: React.FC = () => {
     async function loadData() {
       setLoading(true);
       try {
-        const [rests, doms, audit, mkt] = await Promise.all([
+        const [rests, doms, audit, mkt, assistance] = await Promise.all([
           listAllRestaurants(),
           listAllDomains(),
           listAuditLogs({ limit: 10 }),
           getMarketingWebsiteSettings(),
+          fetchAssistanceRequests(),
         ]);
         setRestaurants(rests);
         setDomains(doms);
         setLogs(audit);
         setMarketingSettings(mkt);
         setHeroMode((mkt.hero?.mode || 'video') as 'existing' | 'video');
+        
+        const openReqs = assistance.filter(r => ['Pending', 'Under Review', 'In Progress', 'Waiting for Restaurant', 'pending'].includes(r.status));
+        setOpenAssistanceRequests(openReqs);
 
         // Initial read of platform settings for development mode
         try {
@@ -251,6 +257,45 @@ export const SuperAdminDashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Open Assistance Requests Alert Banner */}
+      {openAssistanceRequests.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/50 rounded-2xl p-5 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 rounded-xl bg-amber-500 text-slate-950 shrink-0 shadow-md animate-pulse">
+              <LifeBuoy size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-white text-base">Active Restaurant Assistance Requests ({openAssistanceRequests.length})</span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  Action Required
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                {openAssistanceRequests[0].restaurantName || openAssistanceRequests[0].restaurantId} requested support: &quot;{openAssistanceRequests[0].subject || openAssistanceRequests[0].description}&quot;
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href={`/r/${openAssistanceRequests[0].restaurantId}/admin?assistance_mode=true`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <ExternalLink size={15} />
+              <span>Open Full Restaurant Admin</span>
+            </a>
+            <button
+              onClick={() => navigate('/app/super-admin/assistance')}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer"
+            >
+              View All
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Migration Result Banner */}
       {migrationResult && (

@@ -30,7 +30,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { listAllRestaurants } from '../../services/tenantService';
 import { listAllPlans } from '../../services/planService';
-import { Restaurant, Plan, PaymentTransaction } from '../../types';
+import { Restaurant, Plan, PaymentTransaction, Invoice } from '../../types';
 import { cn } from '../../lib/utils';
 import { 
   downloadInvoicePdf, 
@@ -38,10 +38,14 @@ import {
   deleteTransaction, 
   listTransactions,
   sendReminder,
-  markInvoicePaid
+  markInvoicePaid,
+  listAllInvoices,
+  getAdminDashboardStats,
+  createManualInvoice
 } from '../../services/billingService';
 import { updateRestaurant } from '../../services/tenantService';
 import { savePlan } from '../../services/planService';
+import { DEFAULT_PLANS } from '../../data/plans';
 
 const formatCurrency = (amount: number, curr = 'EUR') => {
   return `€${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -53,6 +57,20 @@ export const SuperAdminBilling: React.FC = () => {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [metrics, setMetrics] = useState<any>({
+    totalRevenueCollected: 0,
+    mrr: 0,
+    arr: 0,
+    activePaidSubs: 0,
+    trialSubs: 0,
+    pastDueSubs: 0,
+    cancelledSubs: 0,
+    outstandingInvoicesCount: 0,
+    overdueAmount: 0,
+    failedPaymentsCount: 0,
+    arpu: 0
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateRangeFilter, setDateRangeFilter] = useState<string>('30days');
@@ -66,6 +84,70 @@ export const SuperAdminBilling: React.FC = () => {
   const [newPlanId, setNewPlanId] = useState('');
   const [newStatus, setNewStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  const [isCreateInvoiceModalOpen, setIsCreateInvoiceModalOpen] = useState(false);
+  const [newInvRestaurantId, setNewInvRestaurantId] = useState('');
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('custom');
+  const [newInvAmount, setNewInvAmount] = useState(29);
+  const [newInvCurrency, setNewInvCurrency] = useState('EUR');
+  const [newInvDueDate, setNewInvDueDate] = useState(new Date(Date.now() + 30*86400000).toISOString().split('T')[0]);
+  const [newInvNotes, setNewInvNotes] = useState('');
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
+
+  const handlePackageChange = (pkgId: string) => {
+    setSelectedPackageId(pkgId);
+    if (pkgId === 'custom') {
+      return;
+    }
+    const foundPlan = DEFAULT_PLANS.find(p => p.id === pkgId);
+    if (foundPlan) {
+      setNewInvAmount(foundPlan.priceMonthly);
+      setNewInvNotes(`Subscription Package: ${foundPlan.name} (${formatCurrency(foundPlan.priceMonthly, foundPlan.currency)} / month)`);
+    }
+  };
+
+  const handleCreateInvoiceSubmit = async () => {
+    if (!newInvRestaurantId) {
+      toast.error('Please select a restaurant');
+      return;
+    }
+    const targetRest = restaurants.find(r => r.id === newInvRestaurantId);
+    setIsCreatingInvoice(true);
+    try {
+      await createManualInvoice({
+        restaurantId: newInvRestaurantId,
+        restaurantName: targetRest?.name || newInvRestaurantId,
+        customerEmail: targetRest?.email || 'billing@restaurant.com',
+        amount: Number(newInvAmount),
+        currency: newInvCurrency,
+        dueDate: newInvDueDate,
+        notes: newInvNotes,
+        selectedPlanId: selectedPackageId !== 'custom' ? selectedPackageId : undefined,
+      });
+      toast.success('Invoice created and saved successfully!');
+      setIsCreateInvoiceModalOpen(false);
+      loadBillingData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create invoice');
+    } finally {
+      setIsCreatingInvoice(false);
+    }
+  };
+
+  const exportInvoicesCsv = () => {
+    const headers = ['Invoice ID', 'Restaurant', 'Amount', 'Currency', 'Issue Date', 'Due Date', 'Status'];
+    const rows = allInvoices.map(i => [i.id, i.restaurantName, i.total, i.currency, i.issueDate, i.dueDate, i.status]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `dinemaster_invoices_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Invoices CSV exported successfully!');
+  };
 
   useEffect(() => {
     if (editingSub) {
@@ -124,8 +206,12 @@ export const SuperAdminBilling: React.FC = () => {
       const restList = await listAllRestaurants().catch(() => []);
       const planList = await listAllPlans().catch(() => []);
       const txnList = await listTransactions().catch(() => []);
+      const invList = await listAllInvoices().catch(() => []);
+      const stats = await getAdminDashboardStats().catch(() => ({}));
       
       setTransactions(txnList);
+      setInvoices(invList);
+      setMetrics(stats);
       
       const fallbackRestaurants = (restList && restList.length > 0) ? restList : [
         {
@@ -191,81 +277,12 @@ export const SuperAdminBilling: React.FC = () => {
     loadBillingData();
   }, []);
 
-  // Compute financial metrics
-  const metrics = useMemo(() => {
-    let totalRevenueCollected = 148500;
-    let mrr = 12450;
-    let arr = mrr * 12;
-    let activePaidSubs = 0;
-    let trialSubs = 0;
-    let pastDueSubs = 0;
-    let cancelledSubs = 0;
-    let outstandingInvoicesCount = 3;
-    let overdueAmount = 897;
-    let failedPaymentsCount = 2;
+  // Financial metrics are now handled by the metrics state
 
-    (restaurants || []).forEach((r: any) => {
-      const status = r?.status || 'active';
-      if (status === 'active') {
-        activePaidSubs++;
-      } else if (status === 'trial') {
-        trialSubs++;
-      } else if (status === 'suspended' || status === 'payment_due' || status === 'past_due') {
-        pastDueSubs++;
-      } else if (status === 'cancelled') {
-        cancelledSubs++;
-      }
-    });
-
-    const payingCount = activePaidSubs || 1;
-    const arpu = Math.round(mrr / payingCount);
-
-    return {
-      totalRevenueCollected,
-      mrr,
-      arr,
-      activePaidSubs: activePaidSubs || 24,
-      trialSubs: trialSubs || 6,
-      pastDueSubs: pastDueSubs || 2,
-      cancelledSubs: cancelledSubs || 4,
-      outstandingInvoicesCount,
-      overdueAmount,
-      failedPaymentsCount,
-      arpu,
-    };
-  }, [restaurants]);
-
-  // Mock Invoices list across platform
-  const allInvoices: any[] = useMemo(() => {
-    return (restaurants || []).map((r: any, idx: number) => {
-      const amt = idx % 3 === 0 ? 149 : 59;
-      return {
-        id: `inv-sa-${r?.id || idx}-${idx}`,
-        invoiceNumber: `INV-2026-${100 + idx}`,
-        restaurantId: r?.id || 'rest-id',
-        restaurantName: r?.name || 'Restaurant',
-        restaurantLegalName: r?.legalName || r?.name || 'Restaurant Legal',
-        restaurantAddress: r?.address || 'Main Street 1',
-        restaurantCity: r?.city || 'Dublin',
-        restaurantCountry: r?.country || 'ireland',
-        restaurantVatNumber: r?.vatNumber || r?.settings?.vatNumber || 'IE3849120H',
-        customerEmail: r?.email || r?.ownerEmail || 'manager@restaurant.com',
-        planId: r?.planId || 'business',
-        planName: r?.planId === 'professional' ? 'Professional Plan' : 'Business Plan',
-        billingPeriod: 'Current Billing Cycle',
-        issueDate: new Date(Date.now() - idx * 86400000 * 3).toISOString().split('T')[0],
-        dueDate: new Date(Date.now() + idx * 86400000).toISOString().split('T')[0],
-        paidAt: idx % 5 === 0 ? undefined : new Date().toISOString(),
-        subtotal: amt,
-        taxRate: 23,
-        taxAmount: Math.round(amt * 0.23 * 100) / 100,
-        total: amt,
-        currency: 'EUR',
-        status: idx % 5 === 0 ? 'unpaid' : idx % 7 === 0 ? 'overdue' : 'paid',
-        lineItems: [{ id: 'li-1', description: 'Monthly Subscription', quantity: 1, unitPrice: amt, amount: amt }]
-      };
-    });
-  }, [restaurants]);
+  // Real Invoices list
+  const allInvoices: Invoice[] = useMemo(() => {
+    return invoices;
+  }, [invoices]);
 
   // Real Transactions list
   const allTransactions: any[] = useMemo(() => {
@@ -639,6 +656,27 @@ export const SuperAdminBilling: React.FC = () => {
       {/* TAB 4: INVOICES */}
       {activeTab === 'invoices' && (
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-xs text-slate-400">
+              Browse, filter, and issue invoices across all restaurants.
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportInvoicesCsv}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              >
+                <Download size={14} />
+                <span>Export CSV</span>
+              </button>
+              <button
+                onClick={() => setIsCreateInvoiceModalOpen(true)}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Create Invoice</span>
+              </button>
+            </div>
+          </div>
           <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -650,7 +688,7 @@ export const SuperAdminBilling: React.FC = () => {
                     <th className="px-4 py-3">Issue Date</th>
                     <th className="px-4 py-3">Due Date</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">PDF Download</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -671,7 +709,17 @@ export const SuperAdminBilling: React.FC = () => {
                           {inv.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+                      <td className="px-4 py-3 text-right flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`https://pay.stripe.com/invoice/${inv.id}`);
+                            toast.success(`Stripe payment link copied for invoice ${inv.id}!`);
+                          }}
+                          className="px-2 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[11px] font-semibold cursor-pointer"
+                          title="Copy Stripe Payment Link"
+                        >
+                          Stripe Link
+                        </button>
                         <button
                           onClick={async () => {
                             try {
@@ -957,6 +1005,103 @@ export const SuperAdminBilling: React.FC = () => {
               <button onClick={() => setEditingPlan(null)} className="px-4 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer">Cancel</button>
               <button onClick={handleSavePlan} disabled={isSavingPlan} className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50">
                 {isSavingPlan ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isCreateInvoiceModalOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-xl">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <FileText size={18} className="text-amber-400" />
+              <span>Create Manual Invoice</span>
+            </h2>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Select Restaurant</label>
+                <select
+                  value={newInvRestaurantId}
+                  onChange={(e) => setNewInvRestaurantId(e.target.value)}
+                  className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">-- Choose Restaurant --</option>
+                  {restaurants.map(r => (
+                    <option key={r.id} value={r.id}>{r.name} ({r.slug})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Select Package / Plan (Optional)</label>
+                <select
+                  value={selectedPackageId}
+                  onChange={(e) => handlePackageChange(e.target.value)}
+                  className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="custom">-- Custom Manual Amount / Ad-hoc Service --</option>
+                  {DEFAULT_PLANS.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — €{p.priceMonthly}/mo ({p.description.substring(0, 50)}...)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Amount ({newInvCurrency})</label>
+                  <input
+                    type="number"
+                    value={newInvAmount}
+                    onChange={(e) => setNewInvAmount(Number(e.target.value))}
+                    className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Currency</label>
+                  <select
+                    value={newInvCurrency}
+                    onChange={(e) => setNewInvCurrency(e.target.value)}
+                    className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="EUR">EUR (€)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="GBP">GBP (£)</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Payment Due Date</label>
+                <input
+                  type="date"
+                  value={newInvDueDate}
+                  onChange={(e) => setNewInvDueDate(e.target.value)}
+                  className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Invoice Notes / Description</label>
+                <textarea
+                  rows={3}
+                  value={newInvNotes}
+                  onChange={(e) => setNewInvNotes(e.target.value)}
+                  placeholder="e.g. Custom setup fee & professional tier services for November 2026..."
+                  className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3">
+              <button
+                onClick={() => setIsCreateInvoiceModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateInvoiceSubmit}
+                disabled={isCreatingInvoice}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {isCreatingInvoice ? 'Creating...' : 'Create & Issue Invoice'}
               </button>
             </div>
           </div>

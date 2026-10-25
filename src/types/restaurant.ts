@@ -199,6 +199,7 @@ export interface RestaurantSettings {
   useDefaultFloorPlanBg?: boolean;
   floorPlanOpacity?: number;
   silentBell?: boolean;
+  bellSound?: 'chime' | 'light_beep' | string;
   specialDays?: Record<string, {
     open?: string;
     close?: string;

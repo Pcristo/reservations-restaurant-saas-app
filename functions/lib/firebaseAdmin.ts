@@ -615,6 +615,41 @@ export async function queryFirestoreDocsRest(
   }
 }
 
+export async function listFirestoreDocsRest(
+  collectionName: string,
+  env: Record<string, any> = {},
+  idToken?: string
+): Promise<Array<Record<string, any>>> {
+  const apiKey = env.VITE_FIREBASE_API_KEY || env.FIREBASE_API_KEY || firebaseConfig.apiKey;
+  const projectId = env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+  const databaseId = env.VITE_FIREBASE_DATABASE_ID || env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}?key=${apiKey}`;
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({ documents: [] }));
+    const docs: Array<Record<string, any>> = [];
+    if (data.documents) {
+      for (const item of data.documents) {
+        if (item.fields) {
+          const parsed = parseFirestoreFields(item.fields);
+          const nameParts = String(item.name || '').split('/');
+          const docId = nameParts[nameParts.length - 1];
+          docs.push({ id: docId, ...parsed });
+        }
+      }
+    }
+    return docs;
+  } catch {
+    return [];
+  }
+}
+
 export interface FirebaseEnv {
   VITE_FIREBASE_API_KEY?: string;
   FIREBASE_API_KEY?: string;

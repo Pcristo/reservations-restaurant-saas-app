@@ -12,6 +12,7 @@ import AdminSettings from '../AdminSettings';
 import AdminUsers from '../AdminUsers';
 import AdminPrintSection from '../AdminPrintSection';
 import Instructions from '../Instructions';
+import RestaurantAssistancePage from './RestaurantAssistancePage';
 
 export {
   PublicBooking,
@@ -27,5 +28,6 @@ export {
   AdminSettings,
   AdminUsers,
   AdminPrintSection,
-  Instructions
+  Instructions,
+  RestaurantAssistancePage
 };

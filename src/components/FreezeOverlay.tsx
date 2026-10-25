@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
@@ -9,21 +9,20 @@ import { motion, AnimatePresence } from 'motion/react';
 export function FreezeOverlay() {
   const { settings } = useSettings();
   const { language, t } = useLanguage();
-  const { isStaff } = useAuth();
+  const { isStaff, logout } = useAuth();
   const [isFrozen, setIsFrozen] = useState(false);
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
-  const [lastActivity, setLastActivity] = useState(Date.now());
+
+  // Use refs for activity timestamps so DOM events DO NOT trigger React re-renders or infinite loops
+  const lastActivityRef = useRef<number>(Date.now());
+  const lastRecordedRef = useRef<number>(Date.now());
 
   const freezeEnabled = settings?.freezeEnabled || false;
-  const freezeTime = (settings?.freezeTime || 5) * 60 * 1000; // convert minutes to ms
-  const correctPassword = settings?.appUnlockPin || '';
-
-  const handleActivity = useCallback(() => {
-    if (!isFrozen) {
-      setLastActivity(Date.now());
-    }
-  }, [isFrozen]);
+  const freezeMinutes = Math.max(1, settings?.freezeTime || 5);
+  const freezeTimeMs = freezeMinutes * 60 * 1000;
+  // Support either appUnlockPin or pdfPassword
+  const correctPassword = (settings?.appUnlockPin || settings?.pdfPassword || '').trim();
 
   useEffect(() => {
     if (!freezeEnabled || !isStaff) {
@@ -31,38 +30,52 @@ export function FreezeOverlay() {
       return;
     }
 
-    // Reset timer when login state changes or feature enabled
-    setLastActivity(Date.now());
+    lastActivityRef.current = Date.now();
+    lastRecordedRef.current = Date.now();
 
-    // Event listeners for activity
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
-    events.forEach(event => document.addEventListener(event, handleActivity));
-
-    // Timer check
-    const interval = setInterval(() => {
+    // Throttled activity listener: records activity at most once per second with zero React re-renders
+    const handleActivity = () => {
       const now = Date.now();
-      if (now - lastActivity >= freezeTime) {
+      if (now - lastRecordedRef.current > 1000) {
+        lastRecordedRef.current = now;
+        lastActivityRef.current = now;
+      }
+    };
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'pointerdown'];
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity, { passive: true });
+    });
+
+    // Check idle status every 10 seconds
+    const interval = setInterval(() => {
+      // If no PIN was ever configured, do not accidentally lock the user out
+      if (!correctPassword) return;
+
+      const idleDuration = Date.now() - lastActivityRef.current;
+      if (idleDuration >= freezeTimeMs) {
         setIsFrozen(true);
       }
-    }, 10000); // Check every 10 seconds
+    }, 10000);
 
     return () => {
-      events.forEach(event => document.removeEventListener(event, handleActivity));
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
       clearInterval(interval);
     };
-  }, [freezeEnabled, isStaff, lastActivity, freezeTime, handleActivity]);
+  }, [freezeEnabled, isStaff, freezeTimeMs, correctPassword]);
 
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === correctPassword) {
+    if (!correctPassword || password === correctPassword) {
       setIsFrozen(false);
       setPassword('');
       setError(false);
-      setLastActivity(Date.now());
+      lastActivityRef.current = Date.now();
     } else {
       setError(true);
       setPassword('');
-      // Shake effect or feedback
       setTimeout(() => setError(false), 2000);
     }
   };
@@ -164,11 +177,24 @@ export function FreezeOverlay() {
 
               <button 
                 type="submit"
-                className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition-all shadow-lg shadow-red-900/20 active:scale-95 flex items-center justify-center gap-2"
+                className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition-all shadow-lg shadow-red-900/20 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Unlock size={20} />
                 {language === 'pt' ? 'Desbloquear Aplicação' : 'Unlock Application'}
               </button>
+
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsFrozen(false);
+                    logout(false);
+                  }}
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors underline cursor-pointer"
+                >
+                  {language === 'pt' ? 'Terminar sessão / Mudar de conta' : 'Sign out / Switch account'}
+                </button>
+              </div>
             </form>
           </div>
         </motion.div>

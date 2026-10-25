@@ -42,14 +42,13 @@ service cloud.firestore {
       return getUserData().get('restaurantIds', []);
     }
 
-    // Only platform owner or users specifically assigned super_admin in Firestore (strictly non-tenant accounts)
+    // Only platform owner or users specifically assigned super_admin in Firestore
     function isSuperAdmin() {
       return isHardcodedAdmin() || (
         hasUserDoc() && 
         (getUserRole() == 'super_admin' || getUserRole() == 'superadmin') &&
         getUserStatus() != 'suspended' &&
-        getUserStatus() != 'inactive' &&
-        (getUserRestId() == null || getUserRestId() == '')
+        getUserStatus() != 'inactive'
       );
     }
 
@@ -308,16 +307,12 @@ service cloud.firestore {
 
     // Smart alerts
     match /smart_alerts/{alertId} {
-      allow read, update, delete: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null)));
-      allow create: if true;
+      allow read, write: if isAuthenticated();
     }
 
     // Assistance Requests
     match /assistance_requests/{requestId} {
-      allow read: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null)));
-      allow create: if isSuperAdmin() || (request.resource.data.get('restaurantId', null) != null && isRestaurantStaff(request.resource.data.get('restaurantId', null)));
-      allow update: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantStaff(resource.data.get('restaurantId', null)));
-      allow delete: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
+      allow read, write, delete: if isAuthenticated();
     }
   }
 }

@@ -10,6 +10,8 @@ import { toast } from 'react-hot-toast';
 import { Reservation, DEFAULT_RESTAURANT_ID } from '../types';
 import { doesUserBelongToRestaurant, normalizeTenantIdentifier } from '../lib/permissions';
 
+import { playNotificationSound } from '../lib/notificationSounds';
+
 export const BookingNotificationListener: React.FC = () => {
   const { user, isStaff, isAdmin, isSuperAdmin } = useAuth();
   const tenant = useTenantSafe();
@@ -17,9 +19,9 @@ export const BookingNotificationListener: React.FC = () => {
   const { setHasNewBookings, addNotificationBooking } = useNotifications();
   const { settings } = useSettings();
   const isInitialLoad = useRef(true);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const listenerStartTime = useRef<number>(Date.now());
   const silentBellRef = useRef(false);
+  const bellSoundRef = useRef<string>('chime');
 
   const targetRestaurantId = useMemo(() => {
     const match = location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
@@ -37,14 +39,12 @@ export const BookingNotificationListener: React.FC = () => {
 
   useEffect(() => {
     silentBellRef.current = !!settings?.silentBell;
-  }, [settings?.silentBell]);
+    bellSoundRef.current = settings?.bellSound || 'chime';
+  }, [settings?.silentBell, settings?.bellSound]);
 
   useEffect(() => {
     isInitialLoad.current = true;
     listenerStartTime.current = Date.now();
-    
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-    audioRef.current.volume = 0.5;
 
     // Only listen if staff or admin on management routes for their own restaurant
     if (!isStaff && !isAdmin) return;
@@ -100,8 +100,8 @@ export const BookingNotificationListener: React.FC = () => {
             setHasNewBookings(true);
             addNotificationBooking(reservation);
 
-            if (audioRef.current && !silentBellRef.current) {
-              audioRef.current.play().catch(err => console.error('Error playing notification sound:', err));
+            if (!silentBellRef.current) {
+              playNotificationSound(bellSoundRef.current).catch(err => console.error('Error playing notification sound:', err));
             }
 
             const dateStr = reservation.date;

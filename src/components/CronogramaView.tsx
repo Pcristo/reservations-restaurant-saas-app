@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Table, Reservation, Area, RestaurantSettings } from '../types';
 import { cn, getOptimizedUrl, formatDisplayTime, getEffectiveOpeningHours } from '../lib/utils';
 import { useCustomers } from '../hooks/useCustomers';
-import { format, parseISO, isSameDay, differenceInMinutes, addMinutes, subHours, addHours, isToday } from 'date-fns';
+import { format, parseISO, isSameDay, differenceInMinutes, addMinutes, subDays, addDays, isToday } from 'date-fns';
 import { toast } from 'react-hot-toast';
 import { Clock, Moon, Sun, User, Maximize2, Minimize2, CalendarIcon, ChevronLeft, ChevronRight, Eye, EyeOff, RefreshCw, Search, X, FileText, Globe, Sparkles, Lock, Table2, Ban, Printer, Camera } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
@@ -662,7 +662,7 @@ const [timeRangeType, setTimeRangeType] = useState<'service' | '24h'>(settings?.
               <button type="button" 
                 onClick={() => {
                   const d = parseISO(selectedDate);
-                  onDateChange(format(subHours(d, 24), 'yyyy-MM-dd'));
+                  onDateChange(format(subDays(d, 1), 'yyyy-MM-dd'));
                 }}
                 className={cn(
                   "p-2 rounded-xl transition-colors",
@@ -681,8 +681,7 @@ const [timeRangeType, setTimeRangeType] = useState<'service' | '24h'>(settings?.
                 </div>
                 <input 
                   type="date"
-                        min={new Date().getFullYear() < 2026 ? '2026-01-01' : format(new Date(), 'yyyy-MM-dd')}
-                        lang={language === "pt" ? "pt-PT" : "en-US"} 
+                  lang={language === "pt" ? "pt-PT" : "en-US"} 
                   value={selectedDate}
                   onChange={(e) => onDateChange(e.target.value)}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -701,7 +700,7 @@ const [timeRangeType, setTimeRangeType] = useState<'service' | '24h'>(settings?.
               <button type="button" 
                 onClick={() => {
                   const d = parseISO(selectedDate);
-                  onDateChange(format(addHours(d, 24), 'yyyy-MM-dd'));
+                  onDateChange(format(addDays(d, 1), 'yyyy-MM-dd'));
                 }}
                 className={cn(
                   "p-2 rounded-xl transition-colors",
@@ -1301,12 +1300,12 @@ const [timeRangeType, setTimeRangeType] = useState<'service' | '24h'>(settings?.
 
                           
                           {(() => {
-                            const isRegular = res.isRegularCustomer || (customers && customers.some(c =>
-                              c.isRegular && (
-                                (c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '')) ||
-                                (c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim())
-                              )
-                            ));
+                            const isRegular = !!(customers && customers.find(c => {
+                              const matchId = res.customerUid && c.id === res.customerUid;
+                              const matchEmail = c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim();
+                              const matchPhone = c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '');
+                              return (matchId || matchEmail || matchPhone) && !!c.isRegular;
+                            }));
                             return (
                               <>
                                 {isRegular && (

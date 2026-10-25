@@ -1,18 +1,21 @@
-import { collection, getDocs, setDoc, updateDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, setDoc, updateDoc, doc, query, where, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export interface AssistanceRequest {
   id: string;
+  ticketNumber?: string;
   restaurantId: string;
   restaurantName: string;
   userId: string;
   userEmail: string;
   userName: string;
+  subject?: string;
   description: string;
   status: 'Pending' | 'Under Review' | 'Approved' | 'In Progress' | 'Waiting for Restaurant' | 'Resolved' | 'Rejected' | 'Cancelled';
   createdAt: string;
   updatedAt: string;
   adminNotes?: string;
+  [key: string]: any;
 }
 
 export const ASSISTANCE_STATUSES = [
@@ -64,22 +67,41 @@ export async function createAssistanceRequest(data: {
   userEmail: string;
   userName: string;
   description: string;
-}): Promise<string> {
+  subject?: string;
+}): Promise<{ id: string; ticketNumber: string; [key: string]: any }> {
   const colRef = collection(db, 'assistance_requests');
   const now = new Date().toISOString();
   const docRef = doc(colRef);
-  await setDoc(docRef, {
-    restaurantId: data.restaurantId,
-    restaurantName: data.restaurantName,
-    userId: data.userId,
-    userEmail: data.userEmail,
-    userName: data.userName,
+  const ticketNumber = `TKT-${Math.floor(100000 + Math.random() * 900000)}`;
+  const payload = {
+    ticketNumber,
+    restaurantId: data.restaurantId || 'default-restaurant',
+    restaurantName: data.restaurantName || 'Restaurant',
+    userId: data.userId || 'unknown',
+    userEmail: data.userEmail || 'unknown',
+    userName: data.userName || 'unknown',
     description: data.description,
-    status: 'Pending',
+    subject: data.subject || 'Support Request',
+    status: 'Pending' as const,
     createdAt: now,
     updatedAt: now,
+  };
+  await setDoc(docRef, payload);
+  return { id: docRef.id, ...payload };
+}
+
+export async function updateAssistanceRequest(requestId: string, subject: string, description: string): Promise<void> {
+  const docRef = doc(db, 'assistance_requests', requestId);
+  await updateDoc(docRef, {
+    subject,
+    description,
+    updatedAt: new Date().toISOString(),
   });
-  return docRef.id;
+}
+
+export async function deleteAssistanceRequest(requestId: string): Promise<void> {
+  const docRef = doc(db, 'assistance_requests', requestId);
+  await deleteDoc(docRef);
 }
 
 export async function updateAssistanceRequestStatus(requestId: string, status: string, adminNotes?: string): Promise<void> {

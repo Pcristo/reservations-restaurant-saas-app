@@ -1,6 +1,39 @@
-export type SupportRequestStatus = 'pending' | 'active' | 'approved' | 'resolved' | 'rejected' | 'expired' | 'revoked' | 'closed';
+export type SupportRequestStatus = 
+  | 'pending' 
+  | 'in_progress' 
+  | 'waiting_for_restaurant' 
+  | 'active' 
+  | 'approved' 
+  | 'resolved' 
+  | 'rejected' 
+  | 'expired' 
+  | 'revoked' 
+  | 'closed' 
+  | 'completed'
+  | 'Pending'
+  | 'Approved'
+  | 'Active'
+  | 'Completed'
+  | 'Expired'
+  | 'Rejected'
+  | string;
 
-export type SupportIssueCategory = 'general' | 'technical' | 'billing' | 'reservations' | 'tables' | 'urgent' | 'configuration';
+export type SupportIssueCategory = 
+  | 'general' 
+  | 'technical' 
+  | 'billing' 
+  | 'reservations' 
+  | 'tables' 
+  | 'urgent' 
+  | 'configuration'
+  | 'settings'
+  | 'floor_plan'
+  | 'email_notifications'
+  | 'booking_page'
+  | 'domains'
+  | 'account'
+  | 'other'
+  | string;
 
 export interface SupportAuditLogEntry {
   id: string;

@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS = {
   useDefaultFloorPlanBg: false,
   floorPlanOpacity: 1.0,
   silentBell: false,
+  bellSound: 'chime',
   phoneVerificationEnabled: false,
   gracePeriod: 15,
   enableBookingNumber: true,

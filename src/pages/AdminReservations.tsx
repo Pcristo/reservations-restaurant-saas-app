@@ -181,10 +181,13 @@ export default function AdminReservations() {
       return matches.find(c => c.isRegistered) || matches[0];
     };
 
+    // Strictly prioritize email matching
     if (emailToFind) {
       const found = findPrioritizingRegistered(c => c.email?.trim().toLowerCase() === emailToFind);
       if (found) return found;
     }
+
+    // Fallback if no email provided in reservation
     if (phoneToFind) {
       const found = findPrioritizingRegistered(c => c.phone?.trim().replace(/\s+/g, '') === phoneToFind);
       if (found) return found;
@@ -921,14 +924,20 @@ export default function AdminReservations() {
 
     if (freeTables.length === 0) return "";
 
-    // Sort: 1. OverlappingCount asc (completely free first) 2. Smallest capacity 3. Name alphabetical
+    // Sort: 1. Favorite tables in strict priority order (1st, 2nd, 3rd...) 2. Area match 3. OverlappingCount asc 4. Smallest capacity 5. Name alphabetical
     freeTables.sort((a, b) => {
       if (favoriteTables && favoriteTables.length > 0) {
         const aFavIndex = favoriteTables.indexOf(a.table.id);
         const bFavIndex = favoriteTables.indexOf(b.table.id);
+        
+        // If one is a favorite and the other is not, favorite comes FIRST
         if (aFavIndex !== -1 && bFavIndex === -1) return -1;
         if (bFavIndex !== -1 && aFavIndex === -1) return 1;
-        if (aFavIndex !== -1 && bFavIndex !== -1) return aFavIndex - bFavIndex;
+        
+        // If both are favorites, sort by their priority index (0 is 1st favorite, 1 is 2nd favorite...)
+        if (aFavIndex !== -1 && bFavIndex !== -1) {
+          return aFavIndex - bFavIndex;
+        }
 
         const favoriteAreas = new Set(
           favoriteTables.map(id => tables.find(t => t.id === id)?.areaId).filter(Boolean)
@@ -952,7 +961,18 @@ export default function AdminReservations() {
       });
     });
 
-    return freeTables[0].table.id;
+    const chosenTable = (() => {
+      if (favoriteTables && favoriteTables.length > 0) {
+        // First check if ANY of the customer's favorite tables are in freeTables
+        for (const favId of favoriteTables) {
+          const match = freeTables.find(ft => ft.table.id === favId);
+          if (match) return match.table.id;
+        }
+      }
+      return freeTables[0]?.table.id || "";
+    })();
+
+    return chosenTable;
   };
 
   const getClosedReason = (dateStr: string, timeStr: string, manualSession?: 'lunch' | 'dinner' | string) => {
@@ -967,7 +987,6 @@ export default function AdminReservations() {
       const session = getSessionFromTime(timeStr, dateStr, manualSession as 'lunch' | 'dinner' | undefined);
       if (session === 'lunch' && eff.lunch && !eff.lunch.active) return { closed: true, reason: 'lunch', dayName };
       if (session === 'dinner' && eff.dinner && !eff.dinner.active) return { closed: true, reason: 'dinner', dayName };
-      if (session === 'general') return { closed: true, reason: 'day', dayName };
       
       return { closed: false };
     } catch {
@@ -3093,17 +3112,22 @@ export default function AdminReservations() {
                                       className="px-3.5 py-2 hover:bg-amber-50/70 hover:text-amber-900 cursor-pointer flex items-center justify-between text-sm border-t border-gray-50/80 transition-colors"
                                       onClick={() => {
                                         const val = table.id;
+                                        const currentCustomer = getExistingCustomer(editingRes || newRes);
+                                        let needsVerify = false;
+                                        if (currentCustomer?.favoriteTables && currentCustomer.favoriteTables.length > 0) {
+                                          needsVerify = !currentCustomer.favoriteTables.includes(val);
+                                        }
                                         if (editingRes) {
                                           if (editingRes.isWaitlist) {
-                                            setEditingRes({ ...editingRes, tableId: val, isWaitlist: false, status: 'booked' });
+                                            setEditingRes({ ...editingRes, tableId: val, isWaitlist: false, status: 'booked', verifyTableNumber: needsVerify });
                                           } else {
-                                            setEditingRes({ ...editingRes, tableId: val });
+                                            setEditingRes({ ...editingRes, tableId: val, verifyTableNumber: needsVerify });
                                           }
                                         } else {
                                           if (newRes.isWaitlist) {
-                                            setNewRes({ ...newRes, tableId: val, isWaitlist: false, status: 'booked' });
+                                            setNewRes({ ...newRes, tableId: val, isWaitlist: false, status: 'booked', verifyTableNumber: needsVerify });
                                           } else {
-                                            setNewRes({ ...newRes, tableId: val });
+                                            setNewRes({ ...newRes, tableId: val, verifyTableNumber: needsVerify });
                                           }
                                         }
                                         setIsTableDropdownOpen(false);
@@ -3112,6 +3136,18 @@ export default function AdminReservations() {
                                       <div className="flex items-center gap-2">
                                         <span className="px-2 py-0.5 bg-green-500 text-white rounded-md text-xs font-bold shadow-xs">{tableDisplayInfo.name}</span>
                                         <span className="text-gray-700 font-medium">({tableDisplayInfo.seats} {t('common.guests')}) - {shapeStr}</span>
+                                        {(() => {
+                                          const currentCustomer = getExistingCustomer(editingRes || newRes);
+                                          const favIndex = currentCustomer?.favoriteTables?.indexOf(table.id) ?? -1;
+                                          if (favIndex !== -1) {
+                                            return (
+                                              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[9px] font-black border border-amber-300">
+                                                ★ #{favIndex + 1}
+                                              </span>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
                                       </div>
                                       <div className="flex items-center gap-1.5">
                                         {bookingTimes && (
@@ -3642,9 +3678,12 @@ const ReservationCard: React.FC<{
   const [showContact, setShowContact] = React.useState(false);
   const [showContactActions, setShowContactActions] = React.useState(false);
 
-  const isRegular = !!(res.isRegularCustomer || (customers && res.customerEmail && customers.some(c => 
-    c.isRegular && c.email && c.email.trim().toLowerCase() === res.customerEmail.trim().toLowerCase()
-  )));
+  const isRegular = !!(customers && customers.find(c => {
+    const matchId = res.customerUid && c.id === res.customerUid;
+    const matchEmail = c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim();
+    const matchPhone = c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '');
+    return (matchId || matchEmail || matchPhone) && !!c.isRegular;
+  }));
   
   const isCustomerSaved = !!(customers && res.customerEmail && customers.some(c => 
     c.email && c.email.trim().toLowerCase() === res.customerEmail.trim().toLowerCase()

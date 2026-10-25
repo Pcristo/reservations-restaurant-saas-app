@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { fetchAssistanceRequests, updateAssistanceRequestStatus, AssistanceRequest, ASSISTANCE_STATUSES, ASSISTANCE_STATUS_COLORS } from '../../services/assistanceService';
-import { LifeBuoy, Search, CheckCircle, AlertCircle, Clock, ChevronDown } from 'lucide-react';
+import { fetchAssistanceRequests, updateAssistanceRequestStatus, deleteAssistanceRequest, AssistanceRequest, ASSISTANCE_STATUSES, ASSISTANCE_STATUS_COLORS } from '../../services/assistanceService';
+import { LifeBuoy, Search, CheckCircle, AlertCircle, Clock, ChevronDown, Trash2, ExternalLink } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { Link } from 'react-router-dom';
 
 export function SuperAdminAssistanceRequests() {
   const [requests, setRequests] = useState<AssistanceRequest[]>([]);
@@ -9,6 +10,7 @@ export function SuperAdminAssistanceRequests() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -41,8 +43,23 @@ export function SuperAdminAssistanceRequests() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!deletingTicketId) return;
+    try {
+      await deleteAssistanceRequest(deletingTicketId);
+      setRequests(prev => prev.filter(req => req.id !== deletingTicketId));
+      toast.success('Assistance ticket deleted successfully');
+      setDeletingTicketId(null);
+    } catch (err) {
+      console.error('Failed to delete request:', err);
+      toast.error('Failed to delete request');
+    }
+  };
+
   const filteredRequests = requests.filter(req => {
     const matchesSearch = 
+      req.ticketNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      req.subject?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       req.restaurantName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       req.restaurantId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       req.userName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -70,7 +87,7 @@ export function SuperAdminAssistanceRequests() {
         </div>
         <button
           onClick={loadRequests}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl transition-colors border border-slate-700"
+          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl transition-colors border border-slate-700 cursor-pointer"
         >
           Refresh List
         </button>
@@ -82,7 +99,7 @@ export function SuperAdminAssistanceRequests() {
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="Search restaurant, user, issue..."
+            placeholder="Search ticket #, restaurant, user..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500"
@@ -121,11 +138,12 @@ export function SuperAdminAssistanceRequests() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-950/50 text-slate-400 text-xs font-bold uppercase tracking-wider">
+                  <th className="py-4 px-6">Ticket # & Date</th>
                   <th className="py-4 px-6">Restaurant</th>
-                  <th className="py-4 px-6">Submitted By</th>
-                  <th className="py-4 px-6">Issue Description</th>
-                  <th className="py-4 px-6">Date</th>
+                  <th className="py-4 px-6">Subject</th>
+                  <th className="py-4 px-6">Description</th>
                   <th className="py-4 px-6">Status</th>
+                  <th className="py-4 px-6 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-sm">
@@ -133,19 +151,31 @@ export function SuperAdminAssistanceRequests() {
                   const colorClass = ASSISTANCE_STATUS_COLORS[req.status] || 'bg-slate-500';
                   return (
                     <tr key={req.id} className="hover:bg-slate-800/50 transition-colors">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        <div className="font-mono font-bold text-amber-400 text-base">{req.ticketNumber || 'TKT-1001'}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">{new Date(req.createdAt).toLocaleString()}</div>
+                      </td>
                       <td className="py-4 px-6">
-                        <div className="font-bold text-white">{req.restaurantName || req.restaurantId}</div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                          <span>{req.restaurantName || req.restaurantId}</span>
+                          <Link 
+                            to={`/r/${req.restaurantId}/admin?assistance_mode=true`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors inline-flex items-center gap-1 text-xs font-bold"
+                            title="Open Restaurant in Assistance Mode"
+                          >
+                            <ExternalLink size={12} />
+                            <span>Enter</span>
+                          </Link>
+                        </div>
                         <div className="text-xs text-slate-400 font-mono">ID: {req.restaurantId}</div>
                       </td>
-                      <td className="py-4 px-6">
-                        <div className="text-white font-medium">{req.userName || 'Staff / Admin'}</div>
-                        <div className="text-xs text-slate-400">{req.userEmail}</div>
+                      <td className="py-4 px-6 font-bold text-white max-w-xs">
+                        {req.subject || 'Support Request'}
                       </td>
-                      <td className="py-4 px-6 max-w-xs">
-                        <p className="text-slate-200 line-clamp-3 whitespace-pre-wrap">{req.description}</p>
-                      </td>
-                      <td className="py-4 px-6 text-slate-300 text-xs whitespace-nowrap">
-                        {new Date(req.createdAt).toLocaleString()}
+                      <td className="py-4 px-6 max-w-md">
+                        <p className="text-slate-200 text-xs whitespace-pre-wrap">{req.description}</p>
                       </td>
                       <td className="py-4 px-6">
                         <div className="relative inline-block">
@@ -163,6 +193,15 @@ export function SuperAdminAssistanceRequests() {
                           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                         </div>
                       </td>
+                      <td className="py-4 px-6 text-right">
+                        <button
+                          onClick={() => setDeletingTicketId(req.id)}
+                          className="p-2 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-colors cursor-pointer inline-flex items-center justify-center"
+                          title="Delete Ticket"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -171,6 +210,37 @@ export function SuperAdminAssistanceRequests() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingTicketId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md p-6 rounded-3xl shadow-2xl relative text-center">
+            <div className="w-14 h-14 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={28} />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">
+              Are you sure you want to delete this ticket?
+            </h3>
+            <p className="text-sm text-slate-400 mb-6">
+              This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeletingTicketId(null)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-xl font-bold text-sm transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-sm transition-colors cursor-pointer shadow-lg shadow-red-500/20"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

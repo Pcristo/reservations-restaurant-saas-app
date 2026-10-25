@@ -36,11 +36,12 @@ export const startSupportSession = async (
   requestId: string,
   restaurantId: string,
   adminData: { id: string; name?: string; email?: string },
-  reason?: string
+  reason?: string | number
 ): Promise<SupportSession | null> => {
   try {
     const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+    const reasonText = typeof reason === 'number' ? `Support session duration: ${reason} minutes` : (reason || 'Technical troubleshooting assistance');
     const newSession: SupportSession = {
       id: sessionId,
       requestId,
@@ -48,7 +49,7 @@ export const startSupportSession = async (
       adminId: adminData.id,
       superAdminEmail: adminData.email || '',
       superAdminName: adminData.name || '',
-      reason: reason || 'Technical troubleshooting assistance',
+      reason: reasonText,
       status: 'active',
       createdAt: new Date().toISOString(),
       expiresAt,
@@ -65,7 +66,7 @@ export const startSupportSession = async (
       actorId: adminData.id,
       actorEmail: adminData.email,
       targetRestaurantId: restaurantId,
-      details: { sessionId, requestId, reason }
+      details: { sessionId, requestId, reason: reasonText }
     });
 
     return newSession;
@@ -75,8 +76,14 @@ export const startSupportSession = async (
   }
 };
 
-export const endSupportSession = async (sessionId: string, notes?: string, actor?: any): Promise<void> => {
+export const endSupportSession = async (
+  sessionIdOrOpts: string | { sessionId: string; restaurantId?: string; requestId?: string; notes?: string },
+  notes?: string,
+  actor?: any
+): Promise<void> => {
   try {
+    const sessionId = typeof sessionIdOrOpts === 'string' ? sessionIdOrOpts : sessionIdOrOpts.sessionId;
+    const sessionNotes = typeof sessionIdOrOpts === 'object' ? sessionIdOrOpts.notes || notes : notes;
     const sessionDoc = await getDoc(doc(db, 'support_sessions', sessionId));
     if (!sessionDoc.exists()) throw new Error('Session not found');
     const sessionData = sessionDoc.data() as SupportSession;
@@ -84,7 +91,7 @@ export const endSupportSession = async (sessionId: string, notes?: string, actor
     await updateDoc(doc(db, 'support_sessions', sessionId), {
       status: 'ended',
       endedAt: new Date().toISOString(),
-      closingNotes: notes || ''
+      closingNotes: sessionNotes || ''
     });
     
     await logSupportAction({
@@ -92,7 +99,7 @@ export const endSupportSession = async (sessionId: string, notes?: string, actor
       actorId: actor?.id,
       actorEmail: actor?.email,
       targetRestaurantId: sessionData.restaurantId,
-      details: { sessionId, notes }
+      details: { sessionId, notes: sessionNotes }
     });
   } catch (err) {
     console.warn('[supportService] Error ending support session:', err);
@@ -198,6 +205,100 @@ export const subscribeToAllSupportRequests = (cb: (reqs: SupportRequest[]) => vo
   }
 };
 
+export const subscribeToRestaurantRequests = (restaurantId: string, cb: (requests: SupportRequest[]) => void) => {
+  try {
+    const q = query(collection(db, 'support_requests'), where('restaurantId', '==', restaurantId));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SupportRequest));
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      cb(list);
+    });
+  } catch {
+    cb([]);
+    return () => {};
+  }
+};
+
+export const subscribeToSupportAuditLogs = (restaurantId: string, cb: (logs: any[]) => void) => {
+  try {
+    const q = query(
+      collection(db, 'support_audit_events'),
+      where('targetRestaurantId', '==', restaurantId)
+    );
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      list.sort((a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      cb(list);
+    });
+  } catch {
+    cb([]);
+    return () => {};
+  }
+};
+
+export const toggleSupportAccess = async (restaurantId: string, allowed: boolean): Promise<{ supportAccessAllowed: boolean; revokedSessionId?: string }> => {
+  try {
+    const restRef = doc(db, 'restaurants', restaurantId);
+    await updateDoc(restRef, {
+      supportAccessAllowed: allowed,
+      'settings.supportAccessAllowed': allowed,
+      updatedAt: new Date().toISOString()
+    });
+
+    let revokedSessionId: string | undefined;
+    if (!allowed) {
+      const activeSession = await getActiveSupportSession(restaurantId);
+      if (activeSession) {
+        revokedSessionId = activeSession.id;
+        await endSupportSession(activeSession.id, 'Support access disabled by restaurant admin');
+      }
+    }
+
+    await logSupportAction({
+      action: allowed ? 'support_access_enabled' : 'support_access_disabled',
+      targetRestaurantId: restaurantId,
+      details: { allowed, revokedSessionId }
+    });
+
+    return { supportAccessAllowed: allowed, revokedSessionId };
+  } catch (err) {
+    console.warn('[supportService] Error toggling support access:', err);
+    return { supportAccessAllowed: allowed };
+  }
+};
+
+export const createSupportRequest = async (data: {
+  restaurantId: string;
+  category?: string;
+  subject?: string;
+  description: string;
+  [key: string]: any;
+}): Promise<SupportRequest> => {
+  const colRef = collection(db, 'support_requests');
+  const docRef = doc(colRef);
+  const now = new Date().toISOString();
+  const newReq: SupportRequest = {
+    id: docRef.id,
+    restaurantId: data.restaurantId,
+    restaurantName: data.restaurantName || 'Restaurant',
+    userEmail: data.userEmail || '',
+    category: data.category || 'general',
+    subject: data.subject || 'Support Request',
+    description: data.description,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+    ...data
+  };
+  await setDoc(docRef, newReq);
+  await logSupportAction({
+    action: 'request_created',
+    targetRestaurantId: data.restaurantId,
+    details: { requestId: docRef.id, subject: data.subject }
+  });
+  return newReq;
+};
+
 export const supportService = {
   listSupportRequests,
   updateSupportRequestStatus,
@@ -209,7 +310,11 @@ export const supportService = {
   subscribeToActiveSession,
   validateSupportSession,
   logSupportAction,
-  subscribeToAllSupportRequests
+  subscribeToAllSupportRequests,
+  subscribeToRestaurantRequests,
+  subscribeToSupportAuditLogs,
+  toggleSupportAccess,
+  createSupportRequest
 };
 
 export default supportService;

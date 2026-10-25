@@ -3,9 +3,10 @@ import { getAuth } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
-  persistentSingleTabManager,
+  persistentMultipleTabManager,
   memoryLocalCache,
-  getFirestore 
+  getFirestore,
+  enableNetwork
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -13,12 +14,12 @@ const app = initializeApp(firebaseConfig);
 
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
 
-// Initialize Firestore with single-tab ownership (safe for iframes) and memory fallback
+// Initialize Firestore with multi-tab coordination (avoids tab lease conflicts and stream freezing) and memory fallback
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
     localCache: persistentLocalCache({
-      tabManager: persistentSingleTabManager({ forceOwnership: true })
+      tabManager: persistentMultipleTabManager()
     })
   }, databaseId);
 } catch (err) {
@@ -30,6 +31,15 @@ try {
   } catch {
     firestoreDb = getFirestore(app, databaseId);
   }
+}
+
+// Automatic connection recovery when returning online or waking from system sleep
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    try {
+      enableNetwork(firestoreDb).catch(() => {});
+    } catch {}
+  });
 }
 
 export const db = firestoreDb;

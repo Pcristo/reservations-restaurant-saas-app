@@ -40,7 +40,7 @@ export default function PublicBooking() {
   const { isFeatureEnabled } = useFeatureFlags();
   const tenantCtx = useTenantSafe();
   const tenant = tenantCtx?.tenant;
-  const waitlistEnabled = isFeatureEnabled('waitlist_management') && isPackageFeatureEnabled(tenantCtx?.entitlements, 'waitlist');
+  const waitlistEnabled = false;
   const smsVerificationActive = Boolean(settings?.phoneVerificationEnabled) && isFeatureEnabled('sms_notifications') && isPackageFeatureEnabled(tenantCtx?.entitlements, 'sms');
   const { tables, areas = [], loading: tablesLoading } = useTables();
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -855,22 +855,60 @@ export default function PublicBooking() {
         return !hasOverlap;
       });
 
-      // Fetch customer and check for favorite tables if authenticated
+      // Fetch customer and check for favorite tables
       let favoriteTablesList: string[] = [];
       let isCustomerRegular = false;
-      if (user?.id) {
-        try {
+      let matchedCustomerUid: string | undefined = undefined;
+
+      // Always look up customer in customers collection by user.id, phone, email, or name to ensure accurate isRegular status from DB
+      try {
+        let matchedCustomerData: any = null;
+
+        if (user?.id) {
           const custDoc = await getDoc(doc(db, 'customers', user.id));
           if (custDoc.exists()) {
-            const customerData = custDoc.data();
-            isCustomerRegular = !!customerData.isRegular;
-            if (customerData.favoriteTables && Array.isArray(customerData.favoriteTables)) {
-              favoriteTablesList = customerData.favoriteTables;
+            matchedCustomerData = custDoc.data();
+            matchedCustomerUid = custDoc.id;
+          }
+        }
+
+        if (!matchedCustomerData) {
+          const cleanPhone = formData.phone?.trim().replace(/\s+/g, '');
+          const cleanEmail = formData.email?.trim().toLowerCase();
+          const cleanName = formData.name?.trim().toLowerCase();
+
+          if (cleanPhone || cleanEmail || cleanName) {
+            const custSnapshot = await getDocs(collection(db, 'customers'));
+            const matchingCustomers = custSnapshot.docs
+              .map(d => ({ id: d.id, ...d.data() as any }))
+              .filter(c => {
+                const cEmail = c.email?.trim().toLowerCase();
+                const cPhone = c.phone?.trim().replace(/\s+/g, '');
+                const cName = c.name?.trim().toLowerCase();
+                if (cleanEmail && cEmail && cEmail === cleanEmail) return true;
+                if (cleanPhone && cPhone && cPhone === cleanPhone) return true;
+                if (cleanName && cName && cName === cleanName) return true;
+                return false;
+              });
+
+            if (matchingCustomers.length > 0) {
+              matchedCustomerData = matchingCustomers.find(c => c.isRegistered) || matchingCustomers[0];
+              matchedCustomerUid = matchedCustomerData.id;
             }
           }
-        } catch (err) {
-          console.warn('Non-fatal customer preference lookup error:', err);
         }
+
+        if (matchedCustomerData) {
+          isCustomerRegular = !!matchedCustomerData.isRegular;
+          if (matchedCustomerData.favoriteTables && Array.isArray(matchedCustomerData.favoriteTables)) {
+            const favs = matchedCustomerData.favoriteTables.filter(Boolean);
+            if (favs.length > 0 && favoriteTablesList.length === 0) {
+              favoriteTablesList = favs;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Non-fatal customer regular/favorite lookup error:', err);
       }
 
       const getOverlapCount = (table: any) => {
@@ -896,8 +934,16 @@ export default function PublicBooking() {
         return overlappingRes.length;
       };
 
-      // Sort: 1. Overlapping reservation count asc (completely free first) 2. Smallest capacity first 3. Name numerically
+      // Sort: 1. Favorite tables in strict priority order (1st, 2nd, 3rd...) 2. Overlapping count asc 3. Smallest capacity 4. Name numerically
       availableTables.sort((a, b) => {
+        if (favoriteTablesList && favoriteTablesList.length > 0) {
+          const aFavIndex = favoriteTablesList.indexOf(a.id);
+          const bFavIndex = favoriteTablesList.indexOf(b.id);
+          if (aFavIndex !== -1 && bFavIndex === -1) return -1;
+          if (bFavIndex !== -1 && aFavIndex === -1) return 1;
+          if (aFavIndex !== -1 && bFavIndex !== -1) return aFavIndex - bFavIndex;
+        }
+
         const overlapsA = getOverlapCount(a);
         const overlapsB = getOverlapCount(b);
         if (overlapsA !== overlapsB) return overlapsA - overlapsB;
@@ -972,12 +1018,13 @@ export default function PublicBooking() {
         source: (isAdmin || isStaff) ? 'admin' : 'public',
         verifyTableNumber: shouldJoinWaitlist ? false : needsVerifyTableNumber,
         preferredTableUnavailable,
-        isRegularCustomer: isCustomerRegular,
         language: language === 'pt' ? 'pt' : 'en'
       };
 
       if (user?.id) {
         reservationData.customerUid = user.id;
+      } else if (matchedCustomerUid) {
+        reservationData.customerUid = matchedCustomerUid;
       }
 
       const addedRes = await addReservation(reservationData);
@@ -1076,7 +1123,13 @@ export default function PublicBooking() {
       console.error('[handleBooking error]:', error);
       setBookingStatus('error');
       const errorMsg = error?.message || '';
-      if (errorMsg.includes('permission') || errorMsg.includes('offline')) {
+      if (errorMsg.includes('Monthly booking quota') || errorMsg.includes('quota')) {
+        toast.error(
+          language === 'pt'
+            ? 'Desculpe, neste momento não podemos aceitar esta reserva.'
+            : 'Sorry, at the moment we cannot accept this reservation.'
+        );
+      } else if (errorMsg.includes('permission') || errorMsg.includes('offline')) {
         toast.error(
           language === 'pt'
             ? 'Erro de sincronização com a base de dados. Por favor, recarregue a página e tente novamente.'

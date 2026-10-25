@@ -8,7 +8,7 @@ import {
 } from '../types';
 import { generateInvoicePdf } from '../features/billing/utils/invoicePdfGenerator';
 import { DEFAULT_PLANS } from '../data/plans';
-import { doc, deleteDoc, collection, getDocs, query } from 'firebase/firestore';
+import { doc, deleteDoc, collection, getDocs, query, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 /**
@@ -280,6 +280,55 @@ export async function deleteInvoice(invoiceId: string): Promise<void> {
   }
 }
 
+export async function getAdminDashboardStats(): Promise<any> {
+  const res = await fetch(`/api/billing/admin-dashboard-stats`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch dashboard stats');
+  }
+  const data = await res.json();
+  return data.data || {};
+}
+
+export async function listAllInvoices(): Promise<Invoice[]> {
+  const invoices: Invoice[] = [];
+  try {
+    const res = await fetch(`/api/billing/list-invoices`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        invoices.push(...data.data);
+      }
+    }
+  } catch (err) {
+    console.warn('[billingService] Failed to fetch invoices from API:', err);
+  }
+
+  try {
+    const q = query(collection(db, 'invoices'));
+    const snap = await getDocs(q);
+    snap.forEach((doc) => {
+      const inv = { id: doc.id, ...doc.data() } as Invoice;
+      if (!invoices.some(i => i.id === inv.id)) {
+        invoices.push(inv);
+      }
+    });
+  } catch {}
+
+  try {
+    const cached = localStorage.getItem('dinemaster_invoices_cache');
+    if (cached) {
+      const parsed: Invoice[] = JSON.parse(cached);
+      for (const inv of parsed) {
+        if (!invoices.some(i => i.id === inv.id)) {
+          invoices.push(inv);
+        }
+      }
+    }
+  } catch {}
+
+  return invoices;
+}
+
 export async function deleteTransaction(transactionId: string): Promise<void> {
   // 1. Attempt API call first
   try {
@@ -301,7 +350,7 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
 }
 
 export async function sendReminder(restaurantId: string, invoiceId: string): Promise<void> {
-  const res = await fetch(`/api/billing/reminders`, {
+  const res = await fetch(`/api/billing/send-reminder`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ restaurantId, invoiceId }),
@@ -312,8 +361,10 @@ export async function sendReminder(restaurantId: string, invoiceId: string): Pro
 }
 
 export async function markInvoicePaid(invoiceId: string): Promise<void> {
-  const res = await fetch(`/api/billing/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
+  const res = await fetch(`/api/billing/mark-invoice-paid`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invoiceId }),
   });
   if (!res.ok) {
     throw new Error('Failed to mark invoice as paid');
@@ -339,3 +390,71 @@ export async function listTransactions(): Promise<PaymentTransaction[]> {
 export function downloadInvoicePdf(invoice: Invoice) {
   return generateInvoicePdf(invoice, { autoDownload: true });
 }
+
+export async function createManualInvoice(invoiceData: {
+  restaurantId: string;
+  restaurantName: string;
+  customerEmail: string;
+  amount: number;
+  currency: string;
+  dueDate: string;
+  notes?: string;
+  selectedPlanId?: string;
+}): Promise<Invoice> {
+  const invoiceId = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const subtotal = Number(invoiceData.amount) || 0;
+  const taxRate = 23;
+  const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
+  const total = Math.round((subtotal + taxAmount) * 100) / 100;
+
+  const newInvoice: Invoice = {
+    id: invoiceId,
+    invoiceNumber: invoiceId,
+    restaurantId: invoiceData.restaurantId,
+    restaurantName: invoiceData.restaurantName || invoiceData.restaurantId,
+    restaurantLegalName: invoiceData.restaurantName || invoiceData.restaurantId,
+    restaurantAddress: '123 Restaurant St',
+    customerEmail: invoiceData.customerEmail || 'billing@restaurant.com',
+    planId: invoiceData.selectedPlanId || 'professional',
+    planName: invoiceData.selectedPlanId ? invoiceData.selectedPlanId.toUpperCase() : 'Professional',
+    billingPeriod: `${new Date().toLocaleDateString()} – ${invoiceData.dueDate}`,
+    subtotal,
+    taxRate,
+    taxAmount,
+    total,
+    currency: invoiceData.currency || 'EUR',
+    status: 'unpaid',
+    issueDate: new Date().toISOString().split('T')[0],
+    dueDate: invoiceData.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    lineItems: [
+      {
+        id: `li-${Date.now()}`,
+        description: invoiceData.notes || (invoiceData.selectedPlanId ? `Subscription Plan Package: ${invoiceData.selectedPlanId}` : 'Manual Invoice'),
+        quantity: 1,
+        unitPrice: subtotal,
+        amount: subtotal
+      }
+    ],
+    notes: invoiceData.notes || 'Created via Super Admin Billing',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    const existing = localStorage.getItem('dinemaster_invoices_cache');
+    const parsed: Invoice[] = existing ? JSON.parse(existing) : [];
+    parsed.unshift(newInvoice);
+    localStorage.setItem('dinemaster_invoices_cache', JSON.stringify(parsed));
+  } catch (e) {
+    console.warn('[billingService] Failed to cache new invoice:', e);
+  }
+
+  try {
+    await setDoc(doc(db, 'invoices', invoiceId), newInvoice);
+  } catch (dbErr) {
+    console.warn('[billingService] Direct Firestore setDoc failed (saved in cache):', dbErr);
+  }
+
+  return newInvoice;
+}
+

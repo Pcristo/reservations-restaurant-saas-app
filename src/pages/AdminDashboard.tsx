@@ -21,6 +21,7 @@ import {
   getLocalizedPlanDescription,
 } from '../services/entitlementsService';
 import { DEFAULT_RESTAURANT_ID, Plan, BillingFrequency, RestaurantSubscription } from '../types';
+import { DEFAULT_PLANS } from '../data/plans';
 import { PlanComparisonSection } from '../features/billing/components/PlanComparisonSection';
 import { ChangePlanModal } from '../features/billing/components/ChangePlanModal';
 import { changeSubscriptionPlan } from '../services/billingService';
@@ -163,6 +164,7 @@ export default function AdminDashboard() {
   const { customers, loading: custLoading } = useCustomers();
   const { users, activeStaffCount, staffLimitCheck } = useUsers();
   const { t, language } = useLanguage();
+  const effectivePlan = tenant?.plan || DEFAULT_PLANS.find(p => p.id === 'professional') || DEFAULT_PLANS[0];
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayReservations = reservations.filter(r => r.date === todayStr);
@@ -537,14 +539,12 @@ export default function AdminDashboard() {
   };
 
   const renderReservationItem = (res: any, forceSearchByEmail: boolean = false) => {
-    const isRegular = res.isRegularCustomer || customers.some(c => 
-      c.isRegular && (
-        (c.id === res.customerUid) || 
-        (c.email && res.customerEmail && c.email.trim().toLowerCase() === res.customerEmail.trim().toLowerCase()) ||
-        (c.phone && res.customerPhone && c.phone === res.customerPhone) ||
-        (c.name && res.customerName && c.name.trim().toLowerCase() === res.customerName.trim().toLowerCase())
-      )
-    );
+    const isRegular = !!(customers && customers.find(c => {
+      const matchId = res.customerUid && c.id === res.customerUid;
+      const matchEmail = c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim();
+      const matchPhone = c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '');
+      return (matchId || matchEmail || matchPhone) && !!c.isRegular;
+    }));
 
     const handleCardClick = () => {
       if (forceSearchByEmail && res.date) {
@@ -596,6 +596,12 @@ export default function AdminDashboard() {
             {isRegular && (
               <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-bold uppercase rounded border border-amber-200">
                 {language === 'pt' ? 'REGULAR' : 'REGULAR'}
+              </span>
+            )}
+            {res.verifyTableNumber && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-rose-100 text-rose-700 text-[8px] font-bold uppercase rounded border border-rose-200 animate-pulse">
+                <AlertCircle size={9} strokeWidth={2.5} />
+                {language === 'pt' ? 'Verificar Mesa' : 'Verify Table'}
               </span>
             )}
           </div>
@@ -1255,11 +1261,17 @@ const FloorPlanFilterDropdown: React.FC<{
           });
         });
 
-        const customer = customers.find(c => 
-          c.name?.trim().toLowerCase() === editingRes.customerName?.trim().toLowerCase() ||
-          (c.phone && editingRes.customerPhone && c.phone?.trim() === editingRes.customerPhone?.trim())
+        const emailToFind = editingRes.customerEmail?.trim().toLowerCase();
+        const phoneToFind = editingRes.customerPhone?.trim().replace(/\s+/g, '');
+        const nameToFind = editingRes.customerName?.trim().toLowerCase();
+
+        const matches = customers.filter(c => 
+          (emailToFind && c.email?.trim().toLowerCase() === emailToFind) ||
+          (phoneToFind && c.phone?.trim().replace(/\s+/g, '') === phoneToFind) ||
+          (nameToFind && c.name?.trim().toLowerCase() === nameToFind)
         );
-        const favoriteTables = customer?.favoriteTables || [];
+        const customer = matches.find(c => c.isRegistered) || matches[0];
+        const favoriteTables = (customer?.favoriteTables && Array.isArray(customer.favoriteTables)) ? customer.favoriteTables : [];
 
         freeTables.sort((a, b) => {
           if (favoriteTables && favoriteTables.length > 0) {
@@ -1285,9 +1297,17 @@ const FloorPlanFilterDropdown: React.FC<{
 
         finalTableId = freeTables[0]?.id || "";
         
-        if (finalTableId && favoriteTables.length > 0 && !favoriteTables.includes(finalTableId)) {
-          editingRes.verifyTableNumber = true;
-          (editingRes as any).preferredTableUnavailable = true;
+        if (favoriteTables.length > 0) {
+          if (finalTableId && favoriteTables.includes(finalTableId)) {
+            editingRes.verifyTableNumber = false;
+            (editingRes as any).preferredTableUnavailable = false;
+          } else {
+            editingRes.verifyTableNumber = true;
+            (editingRes as any).preferredTableUnavailable = true;
+          }
+        } else {
+          editingRes.verifyTableNumber = false;
+          (editingRes as any).preferredTableUnavailable = false;
         }
       }
 
@@ -1302,12 +1322,9 @@ const FloorPlanFilterDropdown: React.FC<{
         status: editingRes.status,
         isWaitlist: editingRes.isWaitlist || false,
         notes: editingRes.notes || '',
-        verifyTableNumber: editingRes.verifyTableNumber !== false,
+        verifyTableNumber: !!editingRes.verifyTableNumber,
+        preferredTableUnavailable: !!(editingRes as any).preferredTableUnavailable,
       };
-      
-      if ((editingRes as any).preferredTableUnavailable) {
-        updatePayload.preferredTableUnavailable = true;
-      }
 
       await updateReservation(editingRes.id, updatePayload);
 
@@ -1996,16 +2013,6 @@ const FloorPlanFilterDropdown: React.FC<{
             </div>
           )}
 
-          {/* Assistance Request Button (Always Visible) */}
-          <div className="mb-6 flex justify-end">
-            <button
-              onClick={() => setIsAssistanceModalOpen(true)}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <LifeBuoy size={13} />
-              <span>Request Assistance</span>
-            </button>
-          </div>
 
           <div className="flex flex-col lg:flex-row gap-6 mb-8">
             <div className="flex-1 space-y-6">
@@ -2389,21 +2396,21 @@ const FloorPlanFilterDropdown: React.FC<{
           <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-4 pr-1">
             <Link 
               to={`${adminBase}/live`} 
-              className="flex flex-col items-center justify-center p-4 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 rounded-2xl gap-2 text-center"
+              className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-green-600 dark:text-green-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
             >
               <Map size={24} />
               <span className="font-bold text-xs text-center">{t('nav.live_view')}</span>
             </Link>
             <Link 
               to={`${adminBase}/reservations`} 
-              className="flex flex-col items-center justify-center p-4 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded-2xl gap-2 text-center"
+              className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-amber-600 dark:text-amber-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
             >
               <Calendar size={24} />
               <span className="font-bold text-xs text-center">{t('res.new')}</span>
             </Link>
             <Link 
               to={`${adminBase}/tables`} 
-              className="flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 rounded-2xl gap-2 text-center"
+              className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
             >
               <MdTableRestaurant size={24} />
               <span className="font-bold text-xs text-center">{isAdmin ? t('tables.edit') : t('nav.tables')}</span>
@@ -2411,13 +2418,13 @@ const FloorPlanFilterDropdown: React.FC<{
             {isAdmin ? (
               <Link 
                 to={`${adminBase}/settings`} 
-                className="flex flex-col items-center justify-center p-4 bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 rounded-2xl gap-2 text-center"
+                className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-purple-600 dark:text-purple-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
               >
                 <Settings size={24} />
                 <span className="font-bold text-xs text-center">{t('nav.settings')}</span>
               </Link>
             ) : (
-              <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-800 text-gray-400 rounded-2xl gap-2 cursor-not-allowed text-center">
+              <div className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-gray-400 rounded-2xl gap-2 cursor-not-allowed text-center shadow-sm opacity-60">
                 <Lock size={24} />
                 <span className="font-bold text-xs text-center">{t('nav.settings')}</span>
               </div>
@@ -2426,14 +2433,14 @@ const FloorPlanFilterDropdown: React.FC<{
               <>
                 <Link 
                   to={`${adminBase}/users`} 
-                  className="flex flex-col items-center justify-center p-4 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 rounded-2xl gap-2 text-center"
+                  className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-indigo-600 dark:text-indigo-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
                 >
                   <Users size={24} />
                   <span className="font-bold text-xs text-center">{t('nav.users')}</span>
                 </Link>
                 <Link 
                   to={`${adminBase}/billing`} 
-                  className="flex flex-col items-center justify-center p-4 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded-2xl gap-2 text-center"
+                  className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-amber-600 dark:text-amber-400 rounded-2xl gap-2 text-center shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
                 >
                   <CreditCard size={24} />
                   <span className="font-bold text-xs text-center">{language === 'pt' ? 'Faturação' : 'Billing'}</span>
@@ -2444,7 +2451,7 @@ const FloorPlanFilterDropdown: React.FC<{
       </div>
 
       {/* Dynamic Subscription Package & Resource Usage Widget inside Collapsible Membership Accordion */}
-      {tenant?.plan && (
+      {effectivePlan && (
         <div className={cn(
           "lg:col-span-3 rounded-2xl border shadow-xs overflow-hidden",
           settings?.theme === 'dark' ? "bg-gray-950 border-gray-800" : "bg-white border-gray-100"
@@ -2461,11 +2468,9 @@ const FloorPlanFilterDropdown: React.FC<{
               <div className="p-2.5 rounded-xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
                 <Sparkles size={20} />
               </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-base sm:text-lg font-black text-gray-900 dark:text-white tracking-tight">
-                  {language === 'pt' ? 'Subscrição' : 'Membership'}
-                </span>
-              </div>
+              <span className="text-base sm:text-lg font-black text-gray-900 dark:text-white tracking-tight">
+                Membership
+              </span>
             </div>
             <div className="flex items-center gap-2 text-gray-400">
               <ChevronDown
@@ -2494,13 +2499,10 @@ const FloorPlanFilterDropdown: React.FC<{
               {/* Header row with Package Info & Buttons */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-5 pb-5 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-2xl bg-amber-500/10 text-[#ff6b00] dark:text-orange-400">
-                    <Sparkles size={24} />
-                  </div>
                   <div>
                     <div className="flex items-center gap-3 flex-wrap">
                       <h2 className="text-xl font-black text-[#ff6b00] dark:text-orange-400 tracking-tight uppercase">
-                        {getLocalizedPlanName(tenant.plan, language)}
+                        {getLocalizedPlanName(effectivePlan, language)}
                       </h2>
                       <div className="flex items-center gap-2">
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
@@ -2514,7 +2516,7 @@ const FloorPlanFilterDropdown: React.FC<{
                       </div>
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
-                      {getLocalizedPlanDescription(tenant.plan, language)}
+                      {getLocalizedPlanDescription(effectivePlan, language)}
                     </p>
                   </div>
                 </div>
@@ -3309,8 +3311,8 @@ const FloorPlanFilterDropdown: React.FC<{
                 // We need tenant data, hope it's available in AdminDashboard
                 // I need to use the `tenant` object which is available via useTenantSafe
                 await createAssistanceRequest({
-                  restaurantId: tenant?.id || 'unknown',
-                  restaurantName: tenant?.name || 'Unknown Restaurant',
+                  restaurantId: tenant?.tenant?.id || tenant?.targetRestaurantId || 'unknown',
+                  restaurantName: tenant?.tenant?.name || tenant?.name || 'Unknown Restaurant',
                   userId: user?.id || 'unknown',
                   userEmail: user?.email || 'unknown',
                   userName: user?.name || 'Unknown User',

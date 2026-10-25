@@ -464,6 +464,19 @@ export default function AdminBilling() {
             {activeTab === 'transactions' && (
               <TransactionHistorySection
                 transactions={overview.transactions}
+                onDeleteTransaction={async (id: string) => {
+                  if (!window.confirm(language === 'pt' ? 'Tem a certeza que quer apagar esta transação?' : 'Are you sure you want to delete this transaction?')) return;
+                  setIsActionLoading(true);
+                  try {
+                    await import('../services/billingService').then(m => m.deleteTransaction(id));
+                    toast.success(language === 'pt' ? 'Transação apagada' : 'Transaction deleted');
+                    await loadData();
+                  } catch (err: any) {
+                    toast.error(err?.message || 'Failed to delete transaction');
+                  } finally {
+                    setIsActionLoading(false);
+                  }
+                }}
               />
             )}
           </>

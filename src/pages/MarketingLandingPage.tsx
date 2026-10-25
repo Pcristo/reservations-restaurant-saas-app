@@ -805,6 +805,9 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
               <span className="flex items-center gap-1.5">
                 <Check size={14} className="text-emerald-400" /> {isPt ? '14 Dias de Teste Grátis' : '14-Day Full Free Trial'}
               </span>
+              <span className="flex items-center gap-1.5">
+                <Check size={14} className="text-emerald-400" /> {isPt ? 'Smart Alerts Inteligentes' : 'Smart Alerts'}
+              </span>
             </div>
 
             {/* Dashboard / Floor Plan Mockup Showcase: ONLY rendered inside hero when NOT video hero */}

@@ -395,7 +395,7 @@ export function getTableDisplayForDropdown(
   };
 }
 
-export function getOptimizedUrl(url: string | undefined, settings: Partial<RestaurantSettings> | any | null, type?: 'logo' | 'hero' | 'footer' | 'favicon' | 'social') {
+export function getOptimizedUrl(url: string | undefined, settings: Partial<RestaurantSettings> | any | null, type?: 'logo' | 'hero' | 'footer' | 'favicon' | 'social' | 'gallery' | string) {
   let targetUrl = url;
 
   // If cloudinary is enabled and we have a specific cloudinary field, use it
@@ -672,5 +672,35 @@ export function getTenantSubdomainSlug(host: string): string | null {
   }
   return null;
 }
+
+/**
+ * Safe fetch wrapper that enforces request timeouts to prevent promises from hanging indefinitely.
+ */
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit & { timeoutMs?: number }
+): Promise<Response> {
+  const timeoutMs = init?.timeoutMs ?? 15000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Network request timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  const existingSignal = init?.signal;
+  if (existingSignal) {
+    existingSignal.addEventListener('abort', () => controller.abort(existingSignal.reason));
+  }
+
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 
 

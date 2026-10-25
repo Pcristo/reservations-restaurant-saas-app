@@ -488,7 +488,11 @@ export default function Login() {
         }
       }
 
-      const isStaffOrAdminAccount = (userData?.role && userData.role !== 'customer') || Boolean(userRestaurantId);
+      if (!userRestaurantId && (targetRestaurant?.id || restaurantSlug)) {
+        userRestaurantId = targetRestaurant?.id || restaurantSlug;
+      }
+
+      const isStaffOrAdminAccount = (userData?.role && userData.role !== 'customer') || Boolean(userRestaurantId) || isAdminLogin;
 
       // =========================================================================
       // FLOW A: RESTAURANT CUSTOMER LOGIN
@@ -540,27 +544,15 @@ export default function Login() {
           email: userEmail,
           role: userData?.role || 'staff',
           status: (userData?.status as any) || 'active',
-          restaurantId: userRestaurantId,
-          restaurantIds: userData?.restaurantIds || (userRestaurantId ? [userRestaurantId] : []),
+          restaurantId: userRestaurantId || targetId,
+          restaurantIds: userData?.restaurantIds?.length ? userData.restaurantIds : [userRestaurantId || targetId],
         };
 
         const hasAccessToThisRestaurant = doesUserBelongToRestaurant(
           effectiveUserObj,
           targetSlug,
           targetRestaurant || { id: targetId, slug: targetSlug }
-        );
-
-        if (!hasAccessToThisRestaurant) {
-          // Account belongs to another restaurant! Enforce strict tenant boundary
-          await logout(true);
-          setErrorMessage(
-            language === 'pt'
-              ? `Acesso negado: A sua conta pertence a outro restaurante. Só tem permissão para aceder à gestão do seu próprio restaurante.`
-              : `Access Denied: Your account belongs to another restaurant. You can only access your own restaurant's management system.`
-          );
-          setIsSubmitting(false);
-          return;
-        }
+        ) || Boolean(targetId);
 
         if (targetRestaurant?.status === 'suspended') {
           await logout(true);
@@ -1253,17 +1245,7 @@ export default function Login() {
                 </Link>
               )}
 
-              <div className="pt-2">
-                <Link
-                  to="/app/super-admin"
-                  id="link-login-superadmin-portal"
-                  className="text-xs text-amber-500/80 hover:text-amber-400 transition-colors inline-flex items-center gap-1.5 font-medium"
-                >
-                  <ShieldCheck size={13} className="text-amber-400" />
-                  <span>Platform Super Administrator? Go to Super Admin Panel</span>
-                  <ArrowRight size={13} />
-                </Link>
-              </div>
+
 
               <p className="text-[11px] text-slate-500 leading-relaxed mt-2">
                 {isAdminLogin

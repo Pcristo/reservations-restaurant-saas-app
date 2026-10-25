@@ -110,23 +110,12 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: false,
     },
     build: {
       outDir: 'dist',
       sourcemap: false,
       emptyOutDir: true,
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-            'vendor-mui': ['@mui/material', '@mui/x-date-pickers', '@emotion/react', '@emotion/styled'],
-            'vendor-charts': ['recharts'],
-          },
-        },
-      },
     },
   };
 });

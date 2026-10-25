@@ -6,7 +6,8 @@ import {
   CheckCircle2, 
   Clock, 
   XCircle, 
-  FileText 
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { PaymentTransaction } from '../../../types';
 import { cn } from '../../../lib/utils';
@@ -14,10 +15,12 @@ import { useLanguage } from '../../../hooks/useLanguage';
 
 interface TransactionHistorySectionProps {
   transactions: PaymentTransaction[];
+  onDeleteTransaction?: (id: string) => Promise<void>;
 }
 
 export const TransactionHistorySection: React.FC<TransactionHistorySectionProps> = ({
   transactions,
+  onDeleteTransaction,
 }) => {
   const { language } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -138,6 +141,7 @@ export const TransactionHistorySection: React.FC<TransactionHistorySectionProps>
                 <th className="py-3 px-3">Provider Ref</th>
                 <th className="py-3 px-3 text-right">Amount</th>
                 <th className="py-3 px-3 text-center">Status</th>
+                {onDeleteTransaction && <th className="py-3 px-3"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -179,6 +183,16 @@ export const TransactionHistorySection: React.FC<TransactionHistorySectionProps>
                       </span>
                     )}
                   </td>
+                  {onDeleteTransaction && (
+                    <td className="py-3.5 px-3 text-center">
+                      <button
+                        onClick={() => onDeleteTransaction(tx.id)}
+                        className="text-gray-400 hover:text-rose-600 transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

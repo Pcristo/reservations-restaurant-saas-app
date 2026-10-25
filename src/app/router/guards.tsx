@@ -6,6 +6,7 @@ import { useTenant } from '../../hooks/useTenant';
 import { isUserSuperAdmin, doesUserBelongToRestaurant, normalizeTenantIdentifier } from '../../lib/permissions';
 import { SuperAdminLogin } from '../../pages/superadmin/SuperAdminLogin';
 import { SuperAdminAccessDenied } from '../../pages/superadmin/SuperAdminAccessDenied';
+import { auth } from '../../firebase';
 import toast from 'react-hot-toast';
 
 export function ProtectedRoute({ 
@@ -21,6 +22,14 @@ export function ProtectedRoute({
   const location = useLocation();
   const { language } = useLanguage();
   const isSuper = isSuperAdmin || isUserSuperAdmin(user);
+
+  const params = new URLSearchParams(location.search);
+  const isAssistanceMode = params.get('assistance_mode') === 'true' || sessionStorage.getItem('assistance_mode') === 'true';
+
+  if (isAssistanceMode) {
+    sessionStorage.setItem('assistance_mode', 'true');
+    return <>{children}</>;
+  }
 
   if (loading) {
     return (

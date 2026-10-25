@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useParams, useLocation } from 'react-router-dom';
 import Draggable from 'react-draggable';
 import { useTables } from '../hooks/useTables';
@@ -12,7 +12,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useTenantSafe } from '../hooks/useTenant';
 import { useUsers } from '../hooks/useUsers';
 import { useNotifications } from '../hooks/useNotifications';
-import { format, isToday, parseISO, addHours, subHours, startOfDay, addMinutes, parse, isBefore, isSameDay } from 'date-fns';
+import { format, isToday, parseISO, addDays, subDays, startOfDay, addMinutes, parse, isBefore, isSameDay } from 'date-fns';
 import { MoreVertical, Users, Circle, Square, RectangleHorizontal, Clock, CheckCircle, XCircle, Calendar as CalendarIcon, X, ChevronLeft, ChevronRight, Phone, Mail, MessageSquare, Edit, Link, Plus, Eye, EyeOff, Ban, ChevronUp, ChevronDown, AlertTriangle, Maximize2, Minimize2, Sun, Moon, RefreshCw, AlertCircle, Globe, Table as TableIcon, GripVertical, Pencil, Search , Copy, FileText, Sparkles, Printer, Camera } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable as DndDraggable } from '@hello-pangea/dnd';
 import { cn, getOptimizedUrl, formatDisplayTime, getEffectiveOpeningHours } from '../lib/utils';
@@ -781,7 +781,7 @@ export default function AdminLiveView() {
 
     if (freeTables.length === 0) return "";
 
-    // 3. Sorting (Stable alphabetical + seat priority)
+    // 3. Sorting (Strict favorite table priority first)
     freeTables.sort((a, b) => {
       if (favoriteTables && favoriteTables.length > 0) {
         const aFavIndex = favoriteTables.indexOf(a.id);
@@ -804,18 +804,36 @@ export default function AdminLiveView() {
       return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
 
-    return freeTables[0].id;
+    const chosenTable = (() => {
+      if (favoriteTables && favoriteTables.length > 0) {
+        for (const favId of favoriteTables) {
+          const match = freeTables.find(ft => ft.id === favId);
+          if (match) return match.id;
+        }
+      }
+      return freeTables[0]?.id || "";
+    })();
+
+    return chosenTable;
   };
+
+  const findCustomerForRes = useCallback((email?: string, phone?: string, name?: string) => {
+    const emailToFind = email?.trim().toLowerCase();
+    const phoneToFind = phone?.trim().replace(/\s+/g, '');
+    const nameToFind = name?.trim().toLowerCase();
+
+    const matches = customers.filter(c => 
+      (emailToFind && c.email?.trim().toLowerCase() === emailToFind) ||
+      (phoneToFind && c.phone?.trim().replace(/\s+/g, '') === phoneToFind) ||
+      (nameToFind && c.name?.trim().toLowerCase() === nameToFind)
+    );
+    return matches.find(c => c.isRegistered) || matches[0] || null;
+  }, [customers]);
 
   // Auto-assign table when guests or time changes in the modal
   useEffect(() => {
     if (showNewResModal && !newResData.manualSelection) {
-      const phoneToFind = newResData.phone?.trim().replace(/\s+/g, '');
-      const nameToFind = newResData.name?.trim().toLowerCase();
-      const customer = customers.find(c => 
-        (phoneToFind && c.phone?.trim().replace(/\s+/g, '') === phoneToFind) ||
-        (nameToFind && c.name?.trim().toLowerCase() === nameToFind)
-      );
+      const customer = findCustomerForRes(newResData.email, newResData.phone, newResData.name);
       const bestTable = findBestTable(newResData.guests, selectedDate, newResData.time, customer?.favoriteTables);
       if (bestTable) {
         setNewResData(prev => {
@@ -830,7 +848,7 @@ export default function AdminLiveView() {
         });
       }
     }
-  }, [newResData.guests, newResData.time, showNewResModal, newResData.manualSelection, newResData.name, newResData.phone, customers, selectedDate]);
+  }, [newResData.guests, newResData.time, showNewResModal, newResData.manualSelection, newResData.name, newResData.phone, newResData.email, findCustomerForRes, selectedDate]);
 
   const handleNewReservation = async () => {
     let isTimeClosed = false;
@@ -874,12 +892,7 @@ export default function AdminLiveView() {
     
     // Auto-assign if still not selected AND not explicitly set to "no table"
     if (!targetTableId && !newResData.manualSelection) {
-      const phoneToFind = newResData.phone?.trim().replace(/\s+/g, '');
-      const nameToFind = newResData.name?.trim().toLowerCase();
-      const customer = customers.find(c => 
-        (phoneToFind && c.phone?.trim().replace(/\s+/g, '') === phoneToFind) ||
-        (nameToFind && c.name?.trim().toLowerCase() === nameToFind)
-      );
+      const customer = findCustomerForRes(newResData.email, newResData.phone, newResData.name);
       const bestTable = findBestTable(newResData.guests, selectedDate, newResData.time, customer?.favoriteTables);
       if (bestTable) {
         targetTableId = bestTable;
@@ -1769,12 +1782,12 @@ export default function AdminLiveView() {
                           </div>
                         )}
                         {(() => {
-                          const isRegular = res.isRegularCustomer || (customers && customers.some(c =>
-                            c.isRegular && (
-                              (c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '')) ||
-                              (c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim())
-                            )
-                          ));
+                          const isRegular = !!(customers && customers.find(c => {
+                            const matchId = res.customerUid && c.id === res.customerUid;
+                            const matchEmail = c.email && res.customerEmail && c.email.toLowerCase().trim() === res.customerEmail.toLowerCase().trim();
+                            const matchPhone = c.phone && res.customerPhone && c.phone.replace(/\s+/g, '') === res.customerPhone.replace(/\s+/g, '');
+                            return (matchId || matchEmail || matchPhone) && !!c.isRegular;
+                          }));
                           return (
                             <>
                               {isRegular && (
@@ -2449,7 +2462,7 @@ export default function AdminLiveView() {
             <button type="button" 
               onClick={() => {
                 const d = parseISO(selectedDate);
-                setSelectedDate(format(subHours(d, 24), 'yyyy-MM-dd'));
+                setSelectedDate(format(subDays(d, 1), 'yyyy-MM-dd'));
               }}
               className="p-2 hover:bg-gray-50 rounded-xl text-gray-400 hover:text-amber-600 transition-colors flex items-center justify-center h-full"
             >
@@ -2463,7 +2476,6 @@ export default function AdminLiveView() {
                 </div>
                 <input 
                   type="date"
-                  min={new Date().getFullYear() < 2026 ? '2026-01-01' : format(new Date(), 'yyyy-MM-dd')}
                   lang={language === "pt" ? "pt-PT" : "en-US"} 
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
@@ -2478,7 +2490,6 @@ export default function AdminLiveView() {
                 </div>
                 <input 
                   type="date"
-                  min={new Date().getFullYear() < 2026 ? '2026-01-01' : format(new Date(), 'yyyy-MM-dd')}
                   lang={language === "pt" ? "pt-PT" : "en-US"} 
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
@@ -2499,7 +2510,7 @@ export default function AdminLiveView() {
             <button type="button" 
               onClick={() => {
                 const d = parseISO(selectedDate);
-                setSelectedDate(format(addHours(d, 24), 'yyyy-MM-dd'));
+                setSelectedDate(format(addDays(d, 1), 'yyyy-MM-dd'));
               }}
               className="p-2 hover:bg-gray-50 rounded-xl text-gray-400 hover:text-amber-600 transition-colors flex items-center justify-center h-full"
             >
@@ -3763,16 +3774,21 @@ export default function AdminLiveView() {
                     type="button"
                     onClick={() => {
                       setNewResData({...newResData, tableId: "", tableName: "", manualSelection: false});
-                      const phoneToFind = newResData.phone?.trim().replace(/\s+/g, '');
-      const nameToFind = newResData.name?.trim().toLowerCase();
-      const customer = customers.find(c => 
-        (phoneToFind && c.phone?.trim().replace(/\s+/g, '') === phoneToFind) ||
-        (nameToFind && c.name?.trim().toLowerCase() === nameToFind)
-      );
+                      const customer = findCustomerForRes(newResData.email, newResData.phone, newResData.name);
                       const best = findBestTable(newResData.guests, selectedDate, newResData.time, customer?.favoriteTables);
                       if (best) {
                         const tableObj = tables.find(t => t.id === best);
-                        setNewResData(prev => ({...prev, tableId: best, tableName: tableObj?.name || "", manualSelection: false}));
+                        let needsVerify = false;
+                        if (customer?.favoriteTables && customer.favoriteTables.length > 0) {
+                          needsVerify = !customer.favoriteTables.includes(best);
+                        }
+                        setNewResData(prev => ({
+                          ...prev, 
+                          tableId: best, 
+                          tableName: tableObj?.name || "", 
+                          manualSelection: false,
+                          verifyTableNumber: needsVerify
+                        }));
                       }
                     }}
                     className={cn(
@@ -3912,7 +3928,7 @@ export default function AdminLiveView() {
                   <button type="button" 
                     onClick={() => {
                       const d = parseISO(selectedDate);
-                      setSelectedDate(format(subHours(d, 24), 'yyyy-MM-dd'));
+                      setSelectedDate(format(subDays(d, 1), 'yyyy-MM-dd'));
                     }}
                     className={cn(
                       "p-1.5 rounded-md transition-colors",
@@ -3931,8 +3947,7 @@ export default function AdminLiveView() {
                     </div>
                     <input 
                       type="date"
-                        min={new Date().getFullYear() < 2026 ? '2026-01-01' : format(new Date(), 'yyyy-MM-dd')}
-                        lang={language === "pt" ? "pt-PT" : "en-US"} 
+                      lang={language === "pt" ? "pt-PT" : "en-US"} 
                       value={selectedDate}
                       onChange={(e) => setSelectedDate(e.target.value)}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -3951,7 +3966,7 @@ export default function AdminLiveView() {
                   <button type="button" 
                     onClick={() => {
                       const d = parseISO(selectedDate);
-                      setSelectedDate(format(addHours(d, 24), 'yyyy-MM-dd'));
+                      setSelectedDate(format(addDays(d, 1), 'yyyy-MM-dd'));
                     }}
                     className={cn(
                       "p-1.5 rounded-md transition-colors",

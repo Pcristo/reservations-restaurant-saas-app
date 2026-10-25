@@ -21,7 +21,8 @@ import {
   X,
   ChevronRight,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  MessageCircle
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { APP_CONFIG } from '../../data/appConfig';
@@ -84,6 +85,7 @@ export const SuperAdminLayout: React.FC = () => {
     { label: 'Super Admins', to: '/app/super-admin/admins', icon: ShieldCheck },
     { label: 'Marketing Website', to: '/app/super-admin/marketing', icon: Sparkles },
     { label: 'System Logs', to: '/app/super-admin/logs', icon: FileText },
+    { label: 'Assistance Requests', to: '/app/super-admin/assistance', icon: MessageCircle },
     { label: 'Platform Settings', to: '/app/super-admin/settings', icon: Settings },
   ];
 

@@ -33,6 +33,8 @@ import AdminBilling from '../../pages/AdminBilling';
 import AdminLiveView from '../../pages/AdminLiveView';
 import AdminInsights from '../../pages/AdminInsights';
 import AdminCustomerStats from '../../pages/AdminCustomerStats';
+import RestaurantAssistancePage from '../../pages/restaurant/RestaurantAssistancePage';
+import { AssistanceModeBanner } from '../../components/admin/AssistanceModeBanner';
 import PrivacyPolicy from '../../pages/PrivacyPolicy';
 import TermsAndConditions from '../../pages/TermsAndConditions';
 import CookiePolicy from '../../pages/CookiePolicy';
@@ -53,6 +55,7 @@ import { SuperAdminDomains } from '../../pages/superadmin/SuperAdminDomains';
 import { SuperAdminPlans } from '../../pages/superadmin/SuperAdminPlans';
 import { SuperAdminFeatureFlags } from '../../pages/superadmin/SuperAdminFeatureFlags';
 import { SuperAdminLogs } from '../../pages/superadmin/SuperAdminLogs';
+import { SuperAdminAssistanceRequests } from '../../pages/superadmin/SuperAdminAssistanceRequests';
 import { SuperAdminSettings as SuperAdminSettingsPage } from '../../pages/superadmin/SuperAdminSettings';
 import { SuperAdminMarketing } from '../../pages/superadmin/SuperAdminMarketing';
 import { SuperAdminAdmins } from '../../pages/superadmin/SuperAdminAdmins';
@@ -79,7 +82,12 @@ const PageWrapper = ({ children }: { children: React.ReactNode }) => {
   const transitionsEnabled = settings?.enablePageTransitions !== false;
 
   if (!transitionsEnabled) {
-    return <div className="w-full h-full min-h-screen">{children}</div>;
+    return (
+      <div className="w-full h-full min-h-screen">
+        <AssistanceModeBanner />
+        {children}
+      </div>
+    );
   }
 
   return (
@@ -90,6 +98,7 @@ const PageWrapper = ({ children }: { children: React.ReactNode }) => {
       transition={{ duration: 0.3 }}
       className="w-full h-full min-h-screen"
     >
+      <AssistanceModeBanner />
       {children}
     </motion.div>
   );
@@ -269,6 +278,7 @@ export function AppRoutes() {
           <Route path="admins" element={<SuperAdminAdmins />} />
           <Route path="marketing" element={<SuperAdminMarketing />} />
           <Route path="logs" element={<SuperAdminLogs />} />
+          <Route path="assistance" element={<SuperAdminAssistanceRequests />} />
           <Route path="settings" element={<SuperAdminSettingsPage />} />
           <Route path="*" element={<Navigate to="/app/super-admin" replace />} />
         </Route>
@@ -422,6 +432,7 @@ export function AppRoutes() {
                 <Route path="/r/:slug/admin/packages" element={<PageWrapper><ProtectedRoute role="admin"><AdminBilling /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/plans" element={<PageWrapper><ProtectedRoute role="admin"><AdminBilling /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/instructions" element={<PageWrapper><ProtectedRoute role="staff"><Instructions /></ProtectedRoute></PageWrapper>} />
+                <Route path="/r/:slug/admin/assistance" element={<PageWrapper><ProtectedRoute role="admin"><RestaurantAssistancePage /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/print/section" element={<PageWrapper><ProtectedRoute role="staff"><AdminPrintSection /></ProtectedRoute></PageWrapper>} />
                 <Route path="/r/:slug/admin/print/section-document" element={<PageWrapper><ProtectedRoute role="staff"><AdminPrintSection /></ProtectedRoute></PageWrapper>} />
 

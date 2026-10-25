@@ -129,23 +129,17 @@ const Preloader: React.FC<PreloaderProps> = ({
           className="w-32 h-32 flex items-center justify-center p-2 z-10"
         >
           {isPlatformRoute ? (
-            /* Main DineMaster Pro platform logo (exact same as main Login form) */
-            platformLogoUrl && !logoLoadFailed ? (
-              <div className="w-[110px] h-[110px] rounded-2xl border border-slate-800 shadow-xl shadow-amber-500/10 overflow-hidden bg-slate-900 flex items-center justify-center p-2">
-                <img 
-                  src={platformLogoUrl} 
-                  alt="DineMaster Pro" 
-                  className="max-w-full max-h-full w-auto object-contain"
-                  onError={() => setLogoLoadFailed(true)}
-                />
-              </div>
-            ) : (
+            /* Main DineMaster Pro platform logo / Fork and Knife badge exact match to login form */
+            <div className="w-[110px] h-[110px] rounded-2xl border border-slate-800 shadow-xl shadow-amber-500/10 bg-slate-900 flex items-center justify-center p-2">
               <div 
-                className="w-[110px] h-[110px] rounded-2xl flex items-center justify-center text-slate-950 font-black text-5xl shadow-lg shadow-amber-500/20 bg-white"
+                className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20"
+                style={{
+                  background: 'linear-gradient(to top right, #f59e0b, #fbbf24, #fcd34d)'
+                }}
               >
-                <img src="/logo.png" alt="DineMaster Logo" className="w-20 h-20 object-contain" />
+                <Utensils size={36} className="text-slate-950" />
               </div>
-            )
+            </div>
           ) : (
             /* Restaurant-specific preloader */
             loading ? (
@@ -189,23 +183,25 @@ const Preloader: React.FC<PreloaderProps> = ({
       </div>
 
       {/* Bottom Footer Info: App Name from Config & Developed by Zarco */}
+      {/* Bottom Footer Info: App Name from Config & Developed by Zarco */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4, duration: 0.5 }}
-        className="absolute bottom-6 inset-x-0 flex flex-col items-center justify-center gap-1 text-center pointer-events-none select-none z-20 px-4"
+        className="absolute bottom-6 inset-x-0 flex flex-col items-center justify-center gap-2 text-center pointer-events-none select-none z-20 px-4"
       >
         <span className={cn(
-          "text-xs font-bold tracking-wider uppercase",
-          isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
+          "text-sm font-black tracking-widest uppercase",
+          isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-white" : "text-slate-900"
         )}>
-          {APP_CONFIG.appName}
+          DineMaster Pro
         </span>
         <div className={cn(
-          "flex items-center justify-center gap-1.5 text-[12px] font-medium scale-[1.08]",
+          "flex items-center justify-center gap-2 text-[11px] font-medium opacity-80",
           isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
         )}>
-          <span>{language === 'pt' ? 'Desenvolvido por DineMaster' : 'Developed by DineMaster'}</span>
+          <span>Developed by</span>
+          <img src="/assets/developer/zarco_logo_1_no_bg.png" alt="Zarco Studios" className="h-5 w-auto object-contain" />
         </div>
       </motion.div>
     </motion.div>

@@ -32,6 +32,14 @@ import {
   onRequestPost as billingPaymentMethodsPostHandler,
   onRequestDelete as billingPaymentMethodsDeleteHandler 
 } from "./functions/api/billing/payment-methods";
+import { onRequestPost as billingMarkInvoicePaidHandler } from "./functions/api/billing/mark-invoice-paid";
+import { onRequestPost as billingSendReminderHandler } from "./functions/api/billing/send-reminder";
+import { onRequestGet as billingListInvoicesHandler } from "./functions/api/billing/list-invoices";
+import { onRequestGet as supportDebugHandler } from "./functions/api/support/debug";
+import { onRequestPost as supportCreateHandler } from "./functions/api/support/create";
+import { onRequestPost as supportUpdateStatusHandler } from "./functions/api/support/update-status";
+import { onRequestGet as billingAdminStatsHandler } from "./functions/api/billing/admin-dashboard-stats";
+import { onRequestPost as billingCreateInvoiceHandler } from "./functions/api/billing/create-invoice";
 
 // Preserve existing environment secrets by setting override: false
 dotenv.config({ override: false });
@@ -127,6 +135,14 @@ async function startServer() {
   app.get('/api/billing/payment-methods', adaptFunction(billingPaymentMethodsGetHandler));
   app.post('/api/billing/payment-methods', adaptFunction(billingPaymentMethodsPostHandler));
   app.delete('/api/billing/payment-methods', adaptFunction(billingPaymentMethodsDeleteHandler));
+  app.post('/api/billing/mark-invoice-paid', adaptFunction(billingMarkInvoicePaidHandler));
+  app.post('/api/billing/send-reminder', adaptFunction(billingSendReminderHandler));
+  app.get('/api/billing/list-invoices', adaptFunction(billingListInvoicesHandler));
+  app.post('/api/billing/create-invoice', adaptFunction(billingCreateInvoiceHandler));
+  app.get('/api/billing/admin-dashboard-stats', adaptFunction(billingAdminStatsHandler));
+  app.post('/api/support/create', adaptFunction(supportCreateHandler));
+  app.post('/api/support/update-status', adaptFunction(supportUpdateStatusHandler));
+  app.get('/api/support/debug', adaptFunction(supportDebugHandler));
 
 
   // Vite middleware for development
@@ -183,7 +199,10 @@ if ('serviceWorker' in navigator) {
     });
 
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
