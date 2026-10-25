@@ -20,6 +20,7 @@ import { MarketingSEOHead } from '../components/MarketingSEOHead';
 import { useLanguage } from '../hooks/useLanguage';
 import { useFeatureFlags } from '../services/featureFlagsService';
 import { cn } from '../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
 import restaurantManagerVideo from '../assets/videos/restaurant_manager_video.mp4';
 import ZarcoFooter from '../components/extra/ZarcoFooterTemplate';
 
@@ -39,6 +40,15 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [scrollY, setScrollY] = useState(0);
+
+  const handleScrollTo = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    e.preventDefault();
+    setMobileMenuOpen(false);
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   useEffect(() => {
     if (!settings.hero?.parallax) return;
@@ -474,32 +484,32 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-300">
             {settings.about?.enabled !== false && (
-              <a href="#about" className="hover:text-amber-400 transition-colors">
+              <a href="#about" onClick={(e) => handleScrollTo(e, 'about')} className="hover:text-amber-400 transition-colors">
                 {isPt ? 'Como Funciona' : 'How It Works'}
               </a>
             )}
-            <a href="#features" className="hover:text-amber-400 transition-colors">
+            <a href="#features" onClick={(e) => handleScrollTo(e, 'features')} className="hover:text-amber-400 transition-colors">
               {isPt ? 'Funcionalidades' : 'Features'}
             </a>
             {showReviewsSection && (
-              <a href="#reviews" className="hover:text-amber-400 transition-colors">
+              <a href="#reviews" onClick={(e) => handleScrollTo(e, 'reviews')} className="hover:text-amber-400 transition-colors">
                 {isPt ? 'Avaliações' : 'Reviews'}
               </a>
             )}
             {showPricingSection && (
-              <a href="#pricing" className="hover:text-amber-400 transition-colors">
+              <a href="#pricing" onClick={(e) => handleScrollTo(e, 'pricing')} className="hover:text-amber-400 transition-colors">
                 {isPt ? 'Preços' : 'Pricing'}
               </a>
             )}
             {settings.contact?.enabled !== false && (
-              <a href="#contact" className="hover:text-amber-400 transition-colors">
+              <a href="#contact" onClick={(e) => handleScrollTo(e, 'contact')} className="hover:text-amber-400 transition-colors">
                 {isPt ? 'Contacto' : 'Contact'}
               </a>
             )}
           </nav>
 
           {/* Right Action Buttons with Language Toggler */}
-          <div className="hidden sm:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-3">
             {/* Language Switcher Toggler in Navbar */}
             {multiLanguageEnabled && (
               <div className="flex items-center rounded-xl p-1 bg-slate-900 border border-slate-800 shadow-inner gap-1">
@@ -552,39 +562,10 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
           </div>
 
           {/* Mobile Header Bar */}
-          <div className="sm:hidden flex items-center gap-2">
-            {/* Quick Mobile Language Toggler */}
-            {multiLanguageEnabled && (
-              <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800 gap-0.5">
-                <div className="pl-1 pr-0.5 text-slate-400 flex items-center">
-                  <Globe size={11} className="text-amber-400" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('en')}
-                  className={cn(
-                    "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
-                    language === 'en' ? "bg-amber-500 text-slate-950" : "text-slate-400"
-                  )}
-                >
-                  EN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('pt')}
-                  className={cn(
-                    "px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer",
-                    language === 'pt' ? "bg-amber-500 text-slate-950" : "text-slate-400"
-                  )}
-                >
-                  PT
-                </button>
-              </div>
-            )}
-
+          <div className="md:hidden flex items-center gap-2">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-400 hover:text-white"
+              className="p-2 text-slate-400 hover:text-white cursor-pointer"
               aria-label="Toggle menu"
             >
               {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -593,12 +574,19 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
         </div>
 
         {/* Mobile Dropdown */}
-        {mobileMenuOpen && (
-          <div className="md:hidden border-b border-slate-800 bg-slate-950 px-4 pt-3 pb-6 space-y-3">
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              className="md:hidden overflow-hidden border-b border-slate-800 bg-slate-950 px-4 pt-3 pb-6 space-y-3"
+            >
             {settings.about?.enabled !== false && (
               <a 
                 href="#about" 
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={(e) => handleScrollTo(e, 'about')}
                 className="block py-2 text-sm text-slate-300 hover:text-white"
               >
                 {isPt ? 'Como Funciona' : 'How It Works'}
@@ -606,7 +594,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             )}
             <a 
               href="#features" 
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={(e) => handleScrollTo(e, 'features')}
               className="block py-2 text-sm text-slate-300 hover:text-white"
             >
               {isPt ? 'Funcionalidades' : 'Features'}
@@ -614,7 +602,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             {showReviewsSection && (
               <a 
                 href="#reviews" 
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={(e) => handleScrollTo(e, 'reviews')}
                 className="block py-2 text-sm text-slate-300 hover:text-white"
               >
                 {isPt ? 'Avaliações' : 'Reviews'}
@@ -623,7 +611,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             {showPricingSection && (
               <a 
                 href="#pricing" 
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={(e) => handleScrollTo(e, 'pricing')}
                 className="block py-2 text-sm text-slate-300 hover:text-white"
               >
                 {isPt ? 'Preços' : 'Pricing'}
@@ -632,7 +620,7 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
             {settings.contact?.enabled !== false && (
               <a 
                 href="#contact" 
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={(e) => handleScrollTo(e, 'contact')}
                 className="block py-2 text-sm text-slate-300 hover:text-white"
               >
                 {isPt ? 'Contacto' : 'Contact'}
@@ -648,9 +636,9 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                 <div className="flex items-center rounded-lg p-0.5 bg-slate-900 border border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setLanguage('en')}
+                    onClick={() => { setLanguage('en'); setMobileMenuOpen(false); }}
                     className={cn(
-                      "px-3 py-1 text-xs font-bold rounded-md transition-all",
+                      "px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer",
                       language === 'en'
                         ? "bg-amber-500 text-slate-950 font-bold"
                         : "text-slate-400 hover:text-white"
@@ -660,9 +648,9 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLanguage('pt')}
+                    onClick={() => { setLanguage('pt'); setMobileMenuOpen(false); }}
                     className={cn(
-                      "px-3 py-1 text-xs font-bold rounded-md transition-all",
+                      "px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer",
                       language === 'pt'
                         ? "bg-amber-500 text-slate-950 font-bold"
                         : "text-slate-400 hover:text-white"
@@ -690,8 +678,9 @@ export default function MarketingLandingPage({ settings: initialSettings, initia
                 {isPt ? 'Começar Grátis' : (settings.general?.primaryCtaText || 'Start Free Trial')}
               </a>
             </div>
-          </div>
-        )}
+          </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       {/* ============================================================== */}

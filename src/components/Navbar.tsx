@@ -498,7 +498,7 @@ export default function Navbar() {
 
             {multiLanguageEnabled && settings?.showLanguageSwitch !== false && (
               <div className={cn(
-                "flex items-center rounded-lg p-1 ml-2 transition-colors duration-300",
+                "hidden min-[1240px]:flex items-center rounded-lg p-1 ml-2 transition-colors duration-300",
                 settings?.theme === 'dark' ? "bg-gray-900 border border-gray-800" : "bg-gray-100 border border-gray-200"
               )}>
                 <Globe size={13} className={cn("mr-1 ml-1 shrink-0", settings?.theme === 'dark' ? "text-amber-400" : "text-amber-600")} />
@@ -619,193 +619,201 @@ export default function Navbar() {
       </div>
 
       {/* Mobile Menu */}
-      {isOpen && (
-        <div className={cn(
-          "min-[1240px]:hidden transition-colors border-b duration-300",
-          settings?.theme === 'dark' ? "bg-gray-950 border-gray-800 text-white" : "bg-white border-gray-200"
-        )}>
-          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            {filteredLinks.map((link) => {
-              if (link.external) {
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className={cn(
+              "min-[1240px]:hidden overflow-hidden transition-colors border-b duration-300",
+              settings?.theme === 'dark' ? "bg-gray-950 border-gray-800 text-white" : "bg-white border-gray-200"
+            )}
+          >
+            <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+              {filteredLinks.map((link) => {
+                if (link.external) {
+                  return (
+                    <a
+                      key={link.path}
+                      href={link.path}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setIsOpen(false)}
+                      className={cn(
+                        "block px-3 py-2 rounded-md text-base font-medium transition-colors",
+                        settings?.theme === 'dark' 
+                          ? "text-gray-300 hover:bg-gray-800 hover:text-white" 
+                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      )}
+                    >
+                      {link.name}
+                    </a>
+                  );
+                }
+
+                const isReservationsLink = link.path === '/admin/reservations';
+
                 return (
-                  <a
-                    key={link.path}
-                    href={link.path}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setIsOpen(false)}
-                    className={cn(
-                      "block px-3 py-2 rounded-md text-base font-medium transition-colors",
-                      settings?.theme === 'dark' 
-                        ? "text-gray-300 hover:bg-gray-800 hover:text-white" 
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  <React.Fragment key={link.path}>
+                    <Link
+                      to={link.path === '/' && location.pathname !== '/' ? '/?scrollTo=booking' : link.path}
+                      onClick={(e) => {
+                        setIsOpen(false);
+                        if (link.path === '/') {
+                          handleNavigationAttempt(e, link.path, () => handleBookClick(e));
+                        } else {
+                          handleNavigationAttempt(e, link.path);
+                        }
+                      }}
+                      className={cn(
+                        "block px-3 py-2 rounded-md text-base font-medium transition-colors relative",
+                        location.pathname === link.path
+                          ? (settings?.theme === 'dark' ? "bg-amber-900/40 text-amber-400" : "bg-amber-50 text-amber-700")
+                          : (settings?.theme === 'dark' 
+                              ? "text-gray-300 hover:bg-gray-800 hover:text-white" 
+                              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span>{link.name}</span>
+                          {(link.path === adminBase || link.path.endsWith('/admin') || link.path.endsWith('/staff')) && smartAlertsCount > 0 && (
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Link>
+
+                    {isReservationsLink && hasNewBookings && (isAdmin || isStaff) && (
+                      <div className="pl-3 pr-3 pt-1 pb-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOpen(false);
+                            setIsPopupOpen(true);
+                          }}
+                          className={cn(
+                            "w-full text-left block px-3 py-2.5 rounded-md text-base font-bold transition-colors relative cursor-pointer",
+                            settings?.theme === 'dark'
+                              ? "bg-amber-950/40 text-amber-400 border border-amber-900/20 hover:bg-amber-950/60"
+                              : "bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles size={16} className="text-amber-500 animate-pulse" />
+                              {language === 'pt' ? 'Novas Reservas' : 'New Bookings'}
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold ml-1.5 animate-pulse">
+                                {bookingsToShow.length}
+                              </span>
+                            </span>
+                            <span className="flex h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+                          </div>
+                        </button>
+                      </div>
                     )}
-                  >
-                    {link.name}
-                  </a>
+                  </React.Fragment>
                 );
-              }
+              })}
 
-              const isReservationsLink = link.path === '/admin/reservations';
+              {multiLanguageEnabled && settings?.showLanguageSwitch !== false && (
+                <div className="flex items-center gap-4 px-3 py-2">
+                  <span className="text-sm font-medium text-gray-500 flex items-center gap-2">
+                    <Globe size={16} /> {t('nav.language')}:
+                  </span>
+                  <div className={cn(
+                    "flex rounded-lg p-1 transition-colors duration-300",
+                    settings?.theme === 'dark' ? "bg-gray-900" : "bg-gray-100"
+                  )}>
+                    <button
+                      onClick={() => { setLanguage('en'); setIsOpen(false); }}
+                      className={cn(
+                        "px-4 py-1 text-sm font-bold rounded-md transition-all",
+                        language === 'en' 
+                          ? (settings?.theme === 'dark' ? "bg-gray-800 text-amber-400 shadow-sm" : "bg-white text-amber-600 shadow-sm") 
+                          : "text-gray-500"
+                      )}
+                    >
+                      EN
+                    </button>
+                    <button
+                      onClick={() => { setLanguage('pt'); setIsOpen(false); }}
+                      className={cn(
+                        "px-4 py-1 text-sm font-bold rounded-md transition-all",
+                        language === 'pt' 
+                          ? (settings?.theme === 'dark' ? "bg-gray-800 text-amber-400 shadow-sm" : "bg-white text-amber-600 shadow-sm") 
+                          : "text-gray-500"
+                      )}
+                    >
+                      PT
+                    </button>
+                  </div>
+                </div>
+              )}
 
-              return (
-                <React.Fragment key={link.path}>
-                  <Link
-                    to={link.path === '/' && location.pathname !== '/' ? '/?scrollTo=booking' : link.path}
+              {user ? (
+                <div className="space-y-1">
+                  <button
                     onClick={(e) => {
                       setIsOpen(false);
-                      if (link.path === '/') {
-                        handleNavigationAttempt(e, link.path, () => handleBookClick(e));
-                      } else {
-                        handleNavigationAttempt(e, link.path);
-                      }
+                      handleNavigationAttempt(e, undefined, logout);
                     }}
-                    className={cn(
-                      "block px-3 py-2 rounded-md text-base font-medium transition-colors relative",
-                      location.pathname === link.path
-                        ? (settings?.theme === 'dark' ? "bg-amber-900/40 text-amber-400" : "bg-amber-50 text-amber-700")
-                        : (settings?.theme === 'dark' 
-                            ? "text-gray-300 hover:bg-gray-800 hover:text-white" 
-                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span>{link.name}</span>
-                        {(link.path === adminBase || link.path.endsWith('/admin') || link.path.endsWith('/staff')) && smartAlertsCount > 0 && (
-                          <span className="relative flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-
-                  {isReservationsLink && hasNewBookings && (isAdmin || isStaff) && (
-                    <div className="pl-3 pr-3 pt-1 pb-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsOpen(false);
-                          setIsPopupOpen(true);
-                        }}
-                        className={cn(
-                          "w-full text-left block px-3 py-2.5 rounded-md text-base font-bold transition-colors relative cursor-pointer",
-                          settings?.theme === 'dark'
-                            ? "bg-amber-950/40 text-amber-400 border border-amber-900/20 hover:bg-amber-950/60"
-                            : "bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100/40"
-                        )}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <Sparkles size={16} className="text-amber-500 animate-pulse" />
-                            {language === 'pt' ? 'Novas Reservas' : 'New Bookings'}
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold ml-1.5 animate-pulse">
-                              {bookingsToShow.length}
-                            </span>
-                          </span>
-                          <span className="flex h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-                        </div>
-                      </button>
-                    </div>
-                  )}
-                </React.Fragment>
-              );
-            })}
-
-            {multiLanguageEnabled && settings?.showLanguageSwitch !== false && (
-              <div className="flex items-center gap-4 px-3 py-2">
-                <span className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                  <Globe size={16} /> {t('nav.language')}:
-                </span>
-                <div className={cn(
-                  "flex rounded-lg p-1 transition-colors duration-300",
-                  settings?.theme === 'dark' ? "bg-gray-900" : "bg-gray-100"
-                )}>
-                  <button
-                    onClick={() => { setLanguage('en'); setIsOpen(false); }}
-                    className={cn(
-                      "px-4 py-1 text-sm font-bold rounded-md transition-all",
-                      language === 'en' 
-                        ? (settings?.theme === 'dark' ? "bg-gray-800 text-amber-400 shadow-sm" : "bg-white text-amber-600 shadow-sm") 
-                        : "text-gray-500"
-                    )}
-                  >
-                    EN
-                  </button>
-                  <button
-                    onClick={() => { setLanguage('pt'); setIsOpen(false); }}
-                    className={cn(
-                      "px-4 py-1 text-sm font-bold rounded-md transition-all",
-                      language === 'pt' 
-                        ? (settings?.theme === 'dark' ? "bg-gray-800 text-amber-400 shadow-sm" : "bg-white text-amber-600 shadow-sm") 
-                        : "text-gray-500"
-                    )}
-                  >
-                    PT
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {user ? (
-              <div className="space-y-1">
-                <button
-                  onClick={(e) => {
-                    setIsOpen(false);
-                    handleNavigationAttempt(e, undefined, logout);
-                  }}
-                  className={cn(
-                    "w-full text-left flex items-center gap-2 px-3 py-2 text-base font-medium rounded-md transition-colors cursor-pointer",
-                    settings?.theme === 'dark' ? "text-gray-300 hover:bg-gray-800" : "text-gray-700 hover:bg-gray-100"
-                  )}
-                >
-                  <LogOut size={18} />
-                  <span>{t('nav.logout')}</span>
-                </button>
-                {isStaff && (
-                  <Link
-                    to={`${adminBase}/instructions`}
-                    title={language === 'pt' ? 'Instruções da App' : 'App Instructions'}
-                    onClick={() => setIsOpen(false)}
                     className={cn(
                       "w-full text-left flex items-center gap-2 px-3 py-2 text-base font-medium rounded-md transition-colors cursor-pointer",
                       settings?.theme === 'dark' ? "text-gray-300 hover:bg-gray-800" : "text-gray-700 hover:bg-gray-100"
                     )}
                   >
-                    <HelpCircle size={18} />
+                    <LogOut size={18} />
+                    <span>{t('nav.logout')}</span>
+                  </button>
+                  {isStaff && (
+                    <Link
+                      to={`${adminBase}/instructions`}
+                      title={language === 'pt' ? 'Instruções da App' : 'App Instructions'}
+                      onClick={() => setIsOpen(false)}
+                      className={cn(
+                        "w-full text-left flex items-center gap-2 px-3 py-2 text-base font-medium rounded-md transition-colors cursor-pointer",
+                        settings?.theme === 'dark' ? "text-gray-300 hover:bg-gray-800" : "text-gray-700 hover:bg-gray-100"
+                      )}
+                    >
+                      <HelpCircle size={18} />
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Link
+                    to={customerLoginUrl}
+                    onClick={() => setIsOpen(false)}
+                    className={cn(
+                      "block px-3 py-2 text-base font-medium rounded-md transition-colors",
+                      settings?.theme === 'dark' ? "text-gray-300 hover:bg-gray-800" : "text-gray-700 hover:bg-gray-100"
+                    )}
+                  >
+                    {t('nav.login')}
                   </Link>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <Link
-                  to={customerLoginUrl}
-                  onClick={() => setIsOpen(false)}
-                  className={cn(
-                    "block px-3 py-2 text-base font-medium rounded-md transition-colors",
-                    settings?.theme === 'dark' ? "text-gray-300 hover:bg-gray-800" : "text-gray-700 hover:bg-gray-100"
-                  )}
-                >
-                  {t('nav.login')}
-                </Link>
-                <Link
-                  to={customerSignupUrl}
-                  onClick={() => setIsOpen(false)}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 text-base font-medium rounded-md transition-colors",
-                    settings?.theme === 'dark' ? "text-amber-400 hover:bg-gray-800" : "text-amber-600 hover:bg-amber-50"
-                  )}
-                >
-                  <LogIn size={18} />
-                  <span>{t('nav.signup')}</span>
-                </Link>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                  <Link
+                    to={customerSignupUrl}
+                    onClick={() => setIsOpen(false)}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 text-base font-medium rounded-md transition-colors",
+                      settings?.theme === 'dark' ? "text-amber-400 hover:bg-gray-800" : "text-amber-600 hover:bg-amber-50"
+                    )}
+                  >
+                    <LogIn size={18} />
+                    <span>{t('nav.signup')}</span>
+                  </Link>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isPopupOpen && (

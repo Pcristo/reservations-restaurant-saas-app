@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLanguage } from '../hooks/useLanguage';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { getOptimizedUrl, cn } from '../lib/utils';
 import { X, Cookie, Shield, Eye, Settings, Check } from 'lucide-react';
 import { APP_CONFIG } from '../data/appConfig';
@@ -14,6 +14,9 @@ export default function CookieConsent() {
   const { language, t } = useLanguage();
   const { settings } = useSettings();
   const { user, isStaff, isAdmin } = useAuth();
+
+  const location = useLocation();
+  const isRestaurantContext = location.pathname.startsWith('/r/');
 
   const [preferences, setPreferences] = useState({
     necessary: true,
@@ -205,9 +208,14 @@ export default function CookieConsent() {
                 <X size={20} />
               </button>
 
-              {/* Top Restaurant Logo */}
+              {/* Top Logo / Branding */}
               <div className="flex flex-col items-center justify-center mt-2 mb-6 text-center">
-                {hasLogo ? (
+                {!isRestaurantContext ? (
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <img src="/logo.png" alt="DineMaster Pro" className="w-10 h-10 object-contain rounded-xl shadow-md" />
+                    <span className="font-bold text-lg">{APP_CONFIG.appName}</span>
+                  </div>
+                ) : hasLogo ? (
                   <div className="mb-1 flex items-center justify-center" style={{ height: `${settings?.logoSize || 48}px` }}>
                     <img 
                       src={logoUrl} 

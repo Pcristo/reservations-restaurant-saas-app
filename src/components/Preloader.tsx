@@ -201,7 +201,7 @@ const Preloader: React.FC<PreloaderProps> = ({
           isPlatformRoute || settings?.preloaderBg === 'dark' ? "text-gray-400" : "text-gray-500"
         )}>
           <span>Developed by</span>
-          <img src="/assets/developer/zarco_logo_1_no_bg.png" alt="Zarco Studios" className="h-5 w-auto object-contain" />
+          <img src="/assets/developer/zarco_logo_1_no_bg.png" alt="Zarco Studios" className="h-6 w-auto object-contain" />
         </div>
       </motion.div>
     </motion.div>
