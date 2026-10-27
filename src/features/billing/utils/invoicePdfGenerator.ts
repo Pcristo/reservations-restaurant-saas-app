@@ -1,18 +1,25 @@
 import { jsPDF } from 'jspdf';
 import { Invoice } from '../../../types';
 import { APP_CONFIG } from '../../../data/appConfig';
+import { getInvoicePdfFilename, formatInvoiceName, getDisplayInvoiceNumber, generateCleanInvoiceNumber } from './invoiceNaming';
+
+export { getInvoicePdfFilename, formatInvoiceName, getDisplayInvoiceNumber, generateCleanInvoiceNumber };
 
 export interface GenerateInvoicePdfOptions {
   autoDownload?: boolean;
+  language?: 'en' | 'pt';
 }
 
 /**
- * Generates a high-quality, print-ready vector PDF for a DineMaster Pro invoice.
+ * Generates a high-quality, print-ready vector PDF for a DineMaster Pro invoice in English or Portuguese (PT/PT).
  */
 export function generateInvoicePdf(
   invoice: Invoice,
   options: GenerateInvoicePdfOptions = { autoDownload: true }
 ): jsPDF {
+  const lang: 'en' | 'pt' = options.language || invoice.language || 'pt';
+  const isPt = lang === 'pt';
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -31,16 +38,17 @@ export function generateInvoicePdf(
   const lightBg = [248, 250, 252];      // Slate 50
   const borderLine = [226, 232, 240];   // Slate 200
 
-  // Status colors
-  const statusColors: Record<string, { bg: number[]; text: number[]; label: string }> = {
-    paid: { bg: [236, 253, 245], text: [5, 150, 105], label: 'PAID' },
-    unpaid: { bg: [254, 243, 199], text: [217, 119, 6], label: 'PAYMENT DUE' },
-    pending: { bg: [238, 242, 255], text: [79, 70, 229], label: 'PENDING' },
-    overdue: { bg: [254, 226, 226], text: [220, 38, 38], label: 'OVERDUE' },
-    void: { bg: [241, 245, 249], text: [100, 116, 139], label: 'VOID' },
+  // Status colors & localized labels
+  const statusConfigs: Record<string, { bg: number[]; text: number[]; labelEn: string; labelPt: string }> = {
+    paid: { bg: [236, 253, 245], text: [5, 150, 105], labelEn: 'PAID', labelPt: 'LIQUIDADO' },
+    unpaid: { bg: [254, 243, 199], text: [217, 119, 6], labelEn: 'PAYMENT DUE', labelPt: 'A PAGAR' },
+    pending: { bg: [238, 242, 255], text: [79, 70, 229], labelEn: 'PENDING', labelPt: 'A PROCESSAR' },
+    overdue: { bg: [254, 226, 226], text: [220, 38, 38], labelEn: 'OVERDUE', labelPt: 'VENCIDO' },
+    void: { bg: [241, 245, 249], text: [100, 116, 139], labelEn: 'VOID', labelPt: 'ANULADO' },
   };
 
-  const statusConfig = statusColors[invoice.status] || statusColors.unpaid;
+  const statusConfig = statusConfigs[invoice.status] || statusConfigs.unpaid;
+  const statusLabel = isPt ? statusConfig.labelPt : statusConfig.labelEn;
 
   // 1. Top Decorative Brand Bar
   doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
@@ -66,21 +74,30 @@ export function generateInvoicePdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(slate600[0], slate600[1], slate600[2]);
-  doc.text('Restaurant Reservation & Management Platform', margin + 15, y + 9);
+  doc.text(
+    isPt ? 'Plataforma de Gestao & Reservas de Restauracao' : 'Restaurant Reservation & Management Platform',
+    margin + 15,
+    y + 9
+  );
 
   // Right-aligned Invoice Title & Number
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.setTextColor(darkNavy[0], darkNavy[1], darkNavy[2]);
-  doc.text('INVOICE', pageWidth - margin, y + 3, { align: 'right' });
+  const documentTitle = isPt 
+    ? (invoice.status === 'paid' ? 'FATURA-RECIBO' : 'FATURA')
+    : (invoice.status === 'paid' ? 'RECEIPT' : 'INVOICE');
 
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(19);
+  doc.setTextColor(darkNavy[0], darkNavy[1], darkNavy[2]);
+  doc.text(documentTitle, pageWidth - margin, y + 3, { align: 'right' });
+
+  const displayNum = getDisplayInvoiceNumber(invoice.invoiceNumber, invoice.id, lang);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.text(invoice.invoiceNumber, pageWidth - margin, y + 9, { align: 'right' });
+  doc.text(displayNum, pageWidth - margin, y + 9, { align: 'right' });
 
   // Status Badge
-  const badgeWidth = 32;
+  const badgeWidth = isPt ? 36 : 32;
   const badgeHeight = 7;
   const badgeX = pageWidth - margin - badgeWidth;
   const badgeY = y + 12;
@@ -90,7 +107,7 @@ export function generateInvoicePdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(statusConfig.text[0], statusConfig.text[1], statusConfig.text[2]);
-  doc.text(statusConfig.label, badgeX + badgeWidth / 2, badgeY + 4.8, { align: 'center' });
+  doc.text(statusLabel, badgeX + badgeWidth / 2, badgeY + 4.8, { align: 'center' });
 
   // Divider
   y = 38;
@@ -106,7 +123,7 @@ export function generateInvoicePdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(slate400[0], slate400[1], slate400[2]);
-  doc.text('ISSUED BY', margin, y);
+  doc.text(isPt ? 'EMITIDO POR' : 'ISSUED BY', margin, y);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -118,15 +135,15 @@ export function generateInvoicePdf(
   doc.setTextColor(slate600[0], slate600[1], slate600[2]);
   doc.text(APP_CONFIG.address, margin, y + 9.5);
   doc.text('Dublin 2, D02 CH66, Ireland', margin, y + 14);
-  doc.text(`VAT ID: IE 3849120H | Reg: #682910`, margin, y + 18.5);
-  doc.text(`Billing: billing@wordwide.pro`, margin, y + 23);
+  doc.text(`${isPt ? 'NIF / VAT ID' : 'VAT ID'}: IE 3849120H | Reg: #682910`, margin, y + 18.5);
+  doc.text(`${isPt ? 'Faturacao' : 'Billing'}: billing@wordwide.pro`, margin, y + 23);
 
   // Customer / Restaurant Details
   const customerColX = margin + colWidth + 10;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(slate400[0], slate400[1], slate400[2]);
-  doc.text('BILLED TO', customerColX, y);
+  doc.text(isPt ? 'FATURADO A' : 'BILLED TO', customerColX, y);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -149,10 +166,10 @@ export function generateInvoicePdf(
     custY += 4.5;
   }
   if (invoice.restaurantVatNumber) {
-    doc.text(`VAT ID: ${invoice.restaurantVatNumber}`, customerColX, custY);
+    doc.text(`${isPt ? 'NIF' : 'VAT ID'}: ${invoice.restaurantVatNumber}`, customerColX, custY);
     custY += 4.5;
   }
-  doc.text(`Contact: ${invoice.customerEmail}`, customerColX, custY);
+  doc.text(`${isPt ? 'Contacto' : 'Contact'}: ${invoice.customerEmail}`, customerColX, custY);
 
   // 4. Meta Details Box (Dates, Terms, Period)
   y = 78;
@@ -162,10 +179,10 @@ export function generateInvoicePdf(
   doc.roundedRect(margin, y, contentWidth, 16, 2, 2, 'S');
 
   const metaCols = [
-    { label: 'INVOICE DATE', value: formatDate(invoice.issueDate) },
-    { label: 'PAYMENT DUE', value: formatDate(invoice.dueDate) },
-    { label: 'BILLING PERIOD', value: invoice.billingPeriod || 'Current Month' },
-    { label: 'PLAN', value: invoice.planName || 'Professional' },
+    { label: isPt ? 'DATA DE EMISSAO' : 'INVOICE DATE', value: formatDate(invoice.issueDate, lang) },
+    { label: isPt ? 'VENCIMENTO' : 'PAYMENT DUE', value: formatDate(invoice.dueDate, lang) },
+    { label: isPt ? 'PERIODO' : 'BILLING PERIOD', value: invoice.billingPeriod || (isPt ? 'Mes Corrente' : 'Current Month') },
+    { label: isPt ? 'PLANO' : 'PLAN', value: getLocalizedPlanLabel(invoice.planName || 'Professional', isPt) },
   ];
 
   const metaColWidth = contentWidth / metaCols.length;
@@ -197,18 +214,22 @@ export function generateInvoicePdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(255, 255, 255);
-  doc.text('DESCRIPTION & PERIOD', colDesc, y + 5.5);
-  doc.text('QTY', colQty, y + 5.5, { align: 'center' });
-  doc.text('UNIT PRICE', colPrice, y + 5.5, { align: 'right' });
-  doc.text('VAT', colTax, y + 5.5, { align: 'right' });
-  doc.text('AMOUNT', colTotal, y + 5.5, { align: 'right' });
+  doc.text(isPt ? 'DESCRICAO & PERIODO' : 'DESCRIPTION & PERIOD', colDesc, y + 5.5);
+  doc.text(isPt ? 'QTD' : 'QTY', colQty, y + 5.5, { align: 'center' });
+  doc.text(isPt ? 'PRECO UNIT.' : 'UNIT PRICE', colPrice, y + 5.5, { align: 'right' });
+  doc.text(isPt ? 'IVA' : 'VAT', colTax, y + 5.5, { align: 'right' });
+  doc.text(isPt ? 'TOTAL' : 'AMOUNT', colTotal, y + 5.5, { align: 'right' });
 
   // Rows
   y += 8;
+  const defaultLineDesc = isPt
+    ? `Subscricao Plano ${getLocalizedPlanLabel(invoice.planName, true)} - ${APP_CONFIG.appName}`
+    : `${APP_CONFIG.appName} ${invoice.planName} Subscription`;
+
   const items = invoice.lineItems && invoice.lineItems.length > 0 ? invoice.lineItems : [
     {
       id: 'default-line',
-      description: `${APP_CONFIG.appName} ${invoice.planName} Subscription`,
+      description: defaultLineDesc,
       periodStart: invoice.billingPeriod,
       quantity: 1,
       unitPrice: invoice.subtotal,
@@ -232,18 +253,18 @@ export function generateInvoicePdf(
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(slate400[0], slate400[1], slate400[2]);
-      doc.text(`Period: ${item.periodStart || invoice.billingPeriod}`, colDesc, y + 9.5);
+      doc.text(`${isPt ? 'Periodo' : 'Period'}: ${item.periodStart || invoice.billingPeriod}`, colDesc, y + 9.5);
     }
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(darkNavy[0], darkNavy[1], darkNavy[2]);
     doc.text(String(item.quantity || 1), colQty, y + 6, { align: 'center' });
-    doc.text(formatMoney(item.unitPrice, invoice.currency), colPrice, y + 6, { align: 'right' });
+    doc.text(formatMoney(item.unitPrice, invoice.currency, isPt), colPrice, y + 6, { align: 'right' });
     doc.text(`${invoice.taxRate || 23}%`, colTax, y + 6, { align: 'right' });
 
     doc.setFont('helvetica', 'bold');
-    doc.text(formatMoney(item.amount, invoice.currency), colTotal, y + 6, { align: 'right' });
+    doc.text(formatMoney(item.amount, invoice.currency, isPt), colTotal, y + 6, { align: 'right' });
 
     y += 12;
   });
@@ -255,13 +276,25 @@ export function generateInvoicePdf(
 
   // 6. Summary Totals Box (Right aligned)
   y += 6;
-  const totalsWidth = 72;
+  const totalsWidth = 76;
   const totalsX = pageWidth - margin - totalsWidth;
 
   const summaryRows = [
-    { label: 'Subtotal (excl. VAT)', value: formatMoney(invoice.subtotal, invoice.currency), bold: false },
-    { label: `VAT / Tax (${invoice.taxRate || 23}%)`, value: formatMoney(invoice.taxAmount, invoice.currency), bold: false },
-    { label: 'Total Payable', value: formatMoney(invoice.total, invoice.currency), bold: true },
+    { 
+      label: isPt ? 'Incidencia / Subtotal (s/ IVA)' : 'Subtotal (excl. VAT)', 
+      value: formatMoney(invoice.subtotal, invoice.currency, isPt), 
+      bold: false 
+    },
+    { 
+      label: isPt ? `IVA (${invoice.taxRate || 23}%)` : `VAT / Tax (${invoice.taxRate || 23}%)`, 
+      value: formatMoney(invoice.taxAmount, invoice.currency, isPt), 
+      bold: false 
+    },
+    { 
+      label: isPt ? (invoice.status === 'paid' ? 'Total Liquidado' : 'Total a Pagar') : (invoice.status === 'paid' ? 'Total Paid' : 'Total Payable'), 
+      value: formatMoney(invoice.total, invoice.currency, isPt), 
+      bold: true 
+    },
   ];
 
   summaryRows.forEach((row, i) => {
@@ -297,18 +330,18 @@ export function generateInvoicePdf(
     doc.setTextColor(5, 150, 105); // emerald-600
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text('PAYMENT CONFIRMATION', margin + 4, infoBoxY + 5.5);
+    doc.text(isPt ? 'COMPROVATIVO DE LIQUIDACAO' : 'PAYMENT CONFIRMATION', margin + 4, infoBoxY + 5.5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(darkNavy[0], darkNavy[1], darkNavy[2]);
-    const paidDate = invoice.paidAt ? formatDate(invoice.paidAt) : formatDate(invoice.issueDate);
-    doc.text(`Paid in full on: ${paidDate}`, margin + 4, infoBoxY + 11);
+    const paidDate = invoice.paidAt ? formatDate(invoice.paidAt, lang) : formatDate(invoice.issueDate, lang);
+    doc.text(isPt ? `Liquidado na totalidade em: ${paidDate}` : `Paid in full on: ${paidDate}`, margin + 4, infoBoxY + 11);
     if (invoice.paymentMethodDescription) {
-      doc.text(`Method: ${invoice.paymentMethodDescription}`, margin + 4, infoBoxY + 15.5);
+      doc.text(`${isPt ? 'Metodo' : 'Method'}: ${invoice.paymentMethodDescription}`, margin + 4, infoBoxY + 15.5);
     }
     if (invoice.transactionReference) {
-      doc.text(`Reference: ${invoice.transactionReference}`, margin + 4, infoBoxY + 20);
+      doc.text(`${isPt ? 'Referencia' : 'Reference'}: ${invoice.transactionReference}`, margin + 4, infoBoxY + 20);
     }
   } else {
     doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
@@ -319,17 +352,17 @@ export function generateInvoicePdf(
     doc.setTextColor(darkNavy[0], darkNavy[1], darkNavy[2]);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
-    doc.text('BANK TRANSFER & PAYMENT INSTRUCTIONS', margin + 4, infoBoxY + 5.5);
+    doc.text(isPt ? 'DADOS DE PAGAMENTO & TRANSFERENCIA BANCARIA' : 'BANK TRANSFER & PAYMENT INSTRUCTIONS', margin + 4, infoBoxY + 5.5);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(slate600[0], slate600[1], slate600[2]);
-    doc.text('Bank: Bank of Ireland (College Green, Dublin)', margin + 4, infoBoxY + 10.5);
-    doc.text('Account Name: Worldwide Pro Hospitality Solutions Ltd', margin + 4, infoBoxY + 14.5);
-    doc.text('IBAN: IE29 BOFI 9000 1712 3456 78  |  BIC: BOFIIE2D', margin + 4, infoBoxY + 18.5);
+    doc.text(isPt ? 'Banco: Millennium BCP / Bank of Ireland' : 'Bank: Bank of Ireland (College Green, Dublin)', margin + 4, infoBoxY + 10.5);
+    doc.text(isPt ? 'Titular: Worldwide Pro Hospitality Solutions Ltd' : 'Account Name: Worldwide Pro Hospitality Solutions Ltd', margin + 4, infoBoxY + 14.5);
+    doc.text(isPt ? 'IBAN: PT50 0033 0000 1712 3456 7890 1  |  BIC: BCPTPTLX' : 'IBAN: IE29 BOFI 9000 1712 3456 78  |  BIC: BOFIIE2D', margin + 4, infoBoxY + 18.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-    doc.text(`Payment Reference: ${invoice.invoiceNumber}`, margin + 4, infoBoxY + 23);
+    doc.text(`${isPt ? 'Referencia de Pagamento' : 'Payment Reference'}: ${displayNum}`, margin + 4, infoBoxY + 23);
   }
 
   // 8. Footer Legal & Support
@@ -342,31 +375,42 @@ export function generateInvoicePdf(
   doc.setFontSize(7.5);
   doc.setTextColor(slate400[0], slate400[1], slate400[2]);
   doc.text(
-    `Thank you for managing your restaurant with ${APP_CONFIG.appName}. This invoice was electronically generated and is legally binding.`,
+    isPt 
+      ? `Agradecemos a preferencia na gestao do seu restaurante com o ${APP_CONFIG.appName}. Fatura processada por computador nos termos legais.`
+      : `Thank you for managing your restaurant with ${APP_CONFIG.appName}. This invoice was electronically generated and is legally binding.`,
     margin,
     footerY + 5
   );
   doc.text(
-    `${APP_CONFIG.companyName} Hospitality Solutions Ltd. Registered in Ireland #682910. Questions? Contact billing@wordwide.pro.`,
+    isPt 
+      ? `${APP_CONFIG.companyName} Hospitality Solutions Ltd. NIF/VAT: IE 3849120H. Duvidas? Contacte billing@wordwide.pro.`
+      : `${APP_CONFIG.companyName} Hospitality Solutions Ltd. Registered in Ireland #682910. Questions? Contact billing@wordwide.pro.`,
     margin,
     footerY + 9
   );
 
-  doc.text(`Page 1 of 1`, pageWidth - margin, footerY + 9, { align: 'right' });
+  doc.text(isPt ? 'Pagina 1 de 1' : 'Page 1 of 1', pageWidth - margin, footerY + 9, { align: 'right' });
 
-  // Download if requested
+  // Download if requested following format: {app_name}_factura_{restaurant_name}_{month}_{year2}_pt.pdf or {app_name}_invoice_{restaurant_name}_{month}_{year2}_en.pdf
   if (options.autoDownload && typeof window !== 'undefined') {
-    const filename = `DineMaster-Pro-Invoice-${invoice.invoiceNumber}.pdf`;
+    const filename = getInvoicePdfFilename(invoice, undefined, lang);
     doc.save(filename);
   }
 
   return doc;
 }
 
-function formatDate(isoStr?: string): string {
+function formatDate(isoStr?: string, lang: 'en' | 'pt' = 'pt'): string {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
+    if (lang === 'pt') {
+      return d.toLocaleDateString('pt-PT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    }
     return d.toLocaleDateString('en-GB', {
       day: '2-digit',
       month: 'short',
@@ -377,7 +421,28 @@ function formatDate(isoStr?: string): string {
   }
 }
 
-function formatMoney(amount: number, currency = 'EUR'): string {
-  const sym = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency === 'GBP' ? '£' : `${currency} `;
-  return `${sym}${(amount || 0).toFixed(2)}`;
+function formatMoney(amount: number, currency = 'EUR', isPt = false): string {
+  const formattedNumber = (amount || 0).toFixed(2);
+  if (currency === 'EUR') {
+    return isPt ? `${formattedNumber.replace('.', ',')} €` : `€${formattedNumber}`;
+  }
+  const sym = currency === 'USD' ? '$' : currency === 'GBP' ? '£' : `${currency} `;
+  return `${sym}${formattedNumber}`;
+}
+
+function getLocalizedPlanLabel(planName?: string, isPt = false): string {
+  if (!planName) return isPt ? 'Profissional' : 'Professional';
+  const lower = planName.toLowerCase();
+  if (isPt) {
+    if (lower.includes('starter') || lower.includes('iniciante')) return 'Iniciante';
+    if (lower.includes('pro')) return 'Profissional';
+    if (lower.includes('business') || lower.includes('empresarial')) return 'Empresarial';
+    if (lower.includes('enterprise')) return 'Enterprise';
+    if (lower.includes('trial') || lower.includes('experimental')) return 'Experimental';
+  } else {
+    if (lower.includes('iniciante')) return 'Starter';
+    if (lower.includes('profissional')) return 'Professional';
+    if (lower.includes('empresarial')) return 'Business';
+  }
+  return planName;
 }

@@ -5,6 +5,7 @@ import { Palette, Image as ImageIcon, Sparkles, Check, RefreshCw, Eye, Cloud, Se
 import { toast } from 'react-hot-toast';
 import { ImageUploadField } from './ImageUploadField';
 import { RestaurantGalleryManager } from './RestaurantGalleryManager';
+import { useLanguage } from '../../hooks/useLanguage';
 import { 
   saveCloudinaryConfigLocally, 
   DEFAULT_CLOUDINARY_CLOUD_NAME, 
@@ -12,6 +13,7 @@ import {
 } from '../../services/cloudinaryService';
 
 export const RestaurantBrandingSettings: React.FC = () => {
+  const { language } = useLanguage();
   const { tenant, updateBranding, updateProfile, updateSettings } = useTenant();
 
   const [primaryColor, setPrimaryColor] = useState(tenant?.branding?.primaryColor || '#f59e0b');
@@ -23,6 +25,8 @@ export const RestaurantBrandingSettings: React.FC = () => {
   const [coverImageUrl, setCoverImageUrl] = useState(tenant?.branding?.coverImageUrl || '');
   const [displayName, setDisplayName] = useState(tenant?.branding?.displayName || tenant?.name || '');
   const [galleryImages, setGalleryImages] = useState<RestaurantGalleryImage[]>(tenant?.settings?.galleryImages || []);
+  const [galleryAspectRatio, setGalleryAspectRatio] = useState<'4:3' | '16:9'>(tenant?.settings?.galleryAspectRatio || '4:3');
+  const [showGalleryCaptions, setShowGalleryCaptions] = useState<boolean>(tenant?.settings?.showGalleryCaptions ?? true);
   const [cloudinaryCloudName, setCloudinaryCloudName] = useState(
     tenant?.settings?.cloudinaryCloudName || tenant?.branding?.cloudinaryCloudName || DEFAULT_CLOUDINARY_CLOUD_NAME
   );
@@ -46,6 +50,8 @@ export const RestaurantBrandingSettings: React.FC = () => {
       if (tenant.branding?.coverImageUrl) setCoverImageUrl(tenant.branding.coverImageUrl);
       if (tenant.branding?.displayName || tenant.name) setDisplayName(tenant.branding?.displayName || tenant.name);
       if (tenant.settings?.galleryImages) setGalleryImages(tenant.settings.galleryImages);
+      if (tenant.settings?.galleryAspectRatio) setGalleryAspectRatio(tenant.settings.galleryAspectRatio);
+      if (tenant.settings?.showGalleryCaptions !== undefined) setShowGalleryCaptions(tenant.settings.showGalleryCaptions);
       if (tenant.settings?.cloudinaryCloudName || tenant.branding?.cloudinaryCloudName) {
         setCloudinaryCloudName(tenant.settings?.cloudinaryCloudName || tenant.branding?.cloudinaryCloudName || DEFAULT_CLOUDINARY_CLOUD_NAME);
       }
@@ -98,6 +104,8 @@ export const RestaurantBrandingSettings: React.FC = () => {
       }
       await updateSettings({
         galleryImages,
+        galleryAspectRatio,
+        showGalleryCaptions,
         cloudinaryCloudName: cloudinaryCloudName.trim(),
         cloudinaryUploadPreset: cloudinaryUploadPreset.trim(),
         cloudinaryApiKey: cloudinaryApiKey.trim(),
@@ -403,6 +411,26 @@ export const RestaurantBrandingSettings: React.FC = () => {
         onChange={setGalleryImages}
         restaurantSlug={restaurantSlug}
         restaurantName={restaurantName}
+        galleryAspectRatio={galleryAspectRatio}
+        onGalleryAspectRatioChange={async (ratio) => {
+          setGalleryAspectRatio(ratio);
+          try {
+            await updateSettings({ galleryAspectRatio: ratio });
+            toast.success(language === 'pt' ? 'Rácio atualizado!' : 'Aspect ratio updated!');
+          } catch {
+            toast.error('Failed to update aspect ratio');
+          }
+        }}
+        showGalleryCaptions={showGalleryCaptions}
+        onShowGalleryCaptionsChange={async (show) => {
+          setShowGalleryCaptions(show);
+          try {
+            await updateSettings({ showGalleryCaptions: show });
+            toast.success(language === 'pt' ? 'Definição de legendas atualizada!' : 'Caption setting updated!');
+          } catch {
+            toast.error('Failed to update caption setting');
+          }
+        }}
       />
 
       <div className="flex justify-end">

@@ -289,7 +289,10 @@ export default function Navbar() {
                     src={getOptimizedUrl(settings?.logoUrl, settings, 'logo')} 
                     alt="Logo" 
                     className="w-auto object-contain" 
-                    style={{ height: `${settings?.logoSize || 32}px` }}
+                    style={{ 
+                      height: `${settings?.logoSize || 32}px`,
+                      marginTop: `${settings?.logoTopMargin ?? 0}px`
+                    }}
                     referrerPolicy="no-referrer" 
                   />
                 ) : (

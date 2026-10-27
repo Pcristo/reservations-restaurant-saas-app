@@ -307,7 +307,7 @@ service cloud.firestore {
     match /invoices/{invoiceId} {
       allow read: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
       allow create, update: if isSuperAdmin() || (request.resource.data.get('restaurantId', null) != null && isRestaurantAdmin(request.resource.data.get('restaurantId', null)));
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || (resource.data.get('restaurantId', null) != null && isRestaurantAdmin(resource.data.get('restaurantId', null)));
     }
 
     match /transactions/{transactionId} {

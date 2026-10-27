@@ -336,24 +336,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 authProvider: currentAuthProvider
               }, { merge: true });
             } catch (e) {
-              console.warn('Admin user doc sync note:', e);
+              console.warn('Admin user doc sync note (quota/offline):', e);
             }
 
-            unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
-              if (snap.exists()) {
-                const liveData = snap.data();
-                updateUserWithCache({
-                  id: snap.id,
-                  ...liveData,
-                  role: 'super_admin',
-                  restaurantId: undefined,
-                  restaurantIds: [],
-                  authProvider: currentAuthProvider
-                } as User);
-              }
-            }, (err) => {
-              console.warn('Admin profile listener warning:', err);
-            });
+            try {
+              unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
+                if (snap.exists()) {
+                  const liveData = snap.data();
+                  updateUserWithCache({
+                    id: snap.id,
+                    ...liveData,
+                    role: 'super_admin',
+                    restaurantId: undefined,
+                    restaurantIds: [],
+                    authProvider: currentAuthProvider
+                  } as User);
+                }
+              }, (err) => {
+                console.warn('Admin profile listener warning:', err);
+              });
+            } catch (snapErr) {
+              console.warn('Could not attach profile listener:', snapErr);
+            }
             return;
           }
 

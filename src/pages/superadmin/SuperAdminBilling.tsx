@@ -46,6 +46,7 @@ import {
 import { updateRestaurant } from '../../services/tenantService';
 import { savePlan } from '../../services/planService';
 import { DEFAULT_PLANS } from '../../data/plans';
+import { formatInvoiceName, generateCleanInvoiceNumber, getDisplayInvoiceNumber } from '../../features/billing/utils/invoiceNaming';
 
 const formatCurrency = (amount: number, curr = 'EUR') => {
   return `€${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -80,7 +81,7 @@ export const SuperAdminBilling: React.FC = () => {
   const [newPlanName, setNewPlanName] = useState('');
   const [newPlanPrice, setNewPlanPrice] = useState(0);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
-  const [deletingRecord, setDeletingRecord] = useState<{ type: 'invoice' | 'transaction', id: string } | null>(null);
+  const [deletingRecord, setDeletingRecord] = useState<{ type: 'invoice' | 'transaction', id: string, invoiceNumber?: string } | null>(null);
   const [newPlanId, setNewPlanId] = useState('');
   const [newStatus, setNewStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -92,6 +93,7 @@ export const SuperAdminBilling: React.FC = () => {
   const [newInvCurrency, setNewInvCurrency] = useState('EUR');
   const [newInvDueDate, setNewInvDueDate] = useState(new Date(Date.now() + 30*86400000).toISOString().split('T')[0]);
   const [newInvNotes, setNewInvNotes] = useState('');
+  const [newInvLanguage, setNewInvLanguage] = useState<'pt' | 'en'>('pt');
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
 
   const handlePackageChange = (pkgId: string) => {
@@ -112,6 +114,7 @@ export const SuperAdminBilling: React.FC = () => {
       return;
     }
     const targetRest = restaurants.find(r => r.id === newInvRestaurantId);
+    const generatedInvoiceNumber = generateCleanInvoiceNumber(new Date(), newInvLanguage);
     setIsCreatingInvoice(true);
     try {
       await createManualInvoice({
@@ -123,6 +126,8 @@ export const SuperAdminBilling: React.FC = () => {
         dueDate: newInvDueDate,
         notes: newInvNotes,
         selectedPlanId: selectedPackageId !== 'custom' ? selectedPackageId : undefined,
+        language: newInvLanguage,
+        invoiceNumber: generatedInvoiceNumber,
       });
       toast.success('Invoice created and saved successfully!');
       setIsCreateInvoiceModalOpen(false);
@@ -694,7 +699,7 @@ export const SuperAdminBilling: React.FC = () => {
                 <tbody className="divide-y divide-slate-800/60">
                   {allInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="px-4 py-3 font-mono text-amber-400">{inv.id}</td>
+                      <td className="px-4 py-3 font-mono text-amber-400">{getDisplayInvoiceNumber(inv.invoiceNumber, inv.id, inv.language === 'en' ? 'en' : 'pt')}</td>
                       <td className="px-4 py-3 font-medium text-white">{inv.restaurantName}</td>
                       <td className="px-4 py-3 font-mono font-bold text-white">{formatCurrency(inv.total, inv.currency)}</td>
                       <td className="px-4 py-3 text-slate-300 font-mono text-[11px]">{inv.issueDate}</td>
@@ -713,7 +718,7 @@ export const SuperAdminBilling: React.FC = () => {
                         <button
                           onClick={() => {
                             navigator.clipboard.writeText(`https://pay.stripe.com/invoice/${inv.id}`);
-                            toast.success(`Stripe payment link copied for invoice ${inv.id}!`);
+                            toast.success(`Stripe payment link copied for invoice ${getDisplayInvoiceNumber(inv.invoiceNumber, inv.id, inv.language === 'en' ? 'en' : 'pt')}!`);
                           }}
                           className="px-2 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[11px] font-semibold cursor-pointer"
                           title="Copy Stripe Payment Link"
@@ -723,19 +728,35 @@ export const SuperAdminBilling: React.FC = () => {
                         <button
                           onClick={async () => {
                             try {
-                              await downloadInvoicePdf(inv);
-                              toast.success(`Invoice ${inv.id} downloaded successfully!`);
+                              await downloadInvoicePdf(inv, 'pt');
+                              toast.success(`Fatura ${getDisplayInvoiceNumber(inv.invoiceNumber, inv.id)} (PT) descarregada com sucesso!`);
                             } catch (err) {
                               toast.error('Failed to download invoice PDF.');
                             }
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-amber-500/40"
+                          title="Descarregar Fatura em Português (PT/PT)"
                         >
-                          <Download size={12} />
-                          <span>PDF</span>
+                          <Download size={11} />
+                          <span>PDF (PT)</span>
                         </button>
                         <button
-                          onClick={() => setDeletingRecord({ type: 'invoice', id: inv.id })}
+                          onClick={async () => {
+                            try {
+                              await downloadInvoicePdf(inv, 'en');
+                              toast.success(`Invoice ${getDisplayInvoiceNumber(inv.invoiceNumber, inv.id)} (EN) downloaded successfully!`);
+                            } catch (err) {
+                              toast.error('Failed to download invoice PDF.');
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-indigo-500/40"
+                          title="Download Invoice in English (EN)"
+                        >
+                          <Download size={11} />
+                          <span>PDF (EN)</span>
+                        </button>
+                        <button
+                          onClick={() => setDeletingRecord({ type: 'invoice', id: inv.id, invoiceNumber: inv.invoiceNumber })}
                           className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                         >
                           <Trash2 size={12} />
@@ -784,7 +805,7 @@ export const SuperAdminBilling: React.FC = () => {
                 <tbody className="divide-y divide-slate-800/60">
                   {unpaidInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="px-4 py-3 font-mono text-rose-400">{inv.id}</td>
+                      <td className="px-4 py-3 font-mono text-rose-400">{getDisplayInvoiceNumber(inv.invoiceNumber, inv.id, inv.language === 'en' ? 'en' : 'pt')}</td>
                       <td className="px-4 py-3 font-semibold text-white">{inv.restaurantName}</td>
                       <td className="px-4 py-3 font-mono font-bold text-rose-400">{formatCurrency(inv.total, inv.currency)}</td>
                       <td className="px-4 py-3 text-slate-300 font-mono text-[11px]">{inv.dueDate}</td>
@@ -958,7 +979,9 @@ export const SuperAdminBilling: React.FC = () => {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 space-y-4">
             <h2 className="text-lg font-bold text-white">Confirm Deletion</h2>
-            <p className="text-xs text-slate-400">Are you sure you want to delete this {deletingRecord.type}? This action cannot be undone.</p>
+            <p className="text-xs text-slate-400">
+              Are you sure you want to delete {deletingRecord.type === 'invoice' ? `invoice ${getDisplayInvoiceNumber(deletingRecord.invoiceNumber, deletingRecord.id)}` : 'this transaction'}? This action cannot be undone.
+            </p>
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setDeletingRecord(null)} className="px-4 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer">Cancel</button>
               <button 
@@ -1018,6 +1041,37 @@ export const SuperAdminBilling: React.FC = () => {
               <span>Create Manual Invoice</span>
             </h2>
             <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Invoice Language / Idioma da Fatura</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewInvLanguage('pt')}
+                    className={cn(
+                      "py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5",
+                      newInvLanguage === 'pt'
+                        ? "border-amber-500 bg-amber-500/20 text-amber-300"
+                        : "border-slate-700 bg-slate-800 text-slate-400 hover:text-white"
+                    )}
+                  >
+                    <span>🇵🇹</span>
+                    <span>Português (PT/PT)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewInvLanguage('en')}
+                    className={cn(
+                      "py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5",
+                      newInvLanguage === 'en'
+                        ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
+                        : "border-slate-700 bg-slate-800 text-slate-400 hover:text-white"
+                    )}
+                  >
+                    <span>🇬🇧</span>
+                    <span>English (EN)</span>
+                  </button>
+                </div>
+              </div>
               <div>
                 <label className="block text-slate-400 mb-1 font-medium">Select Restaurant</label>
                 <select

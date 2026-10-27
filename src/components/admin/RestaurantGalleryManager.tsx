@@ -11,10 +11,12 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { cn } from '../../lib/utils';
 import { RestaurantGalleryImage } from '../../types';
 import { uploadRestaurantImageToCloudinary } from '../../services/cloudinaryService';
+import { useLanguage } from '../../hooks/useLanguage';
 
 export interface RestaurantGalleryManagerProps {
   images: RestaurantGalleryImage[];
@@ -23,9 +25,11 @@ export interface RestaurantGalleryManagerProps {
   restaurantName?: string;
   theme?: 'light' | 'dark';
   customSettings?: any;
+  galleryAspectRatio?: '4:3' | '16:9';
+  onGalleryAspectRatioChange?: (ratio: '4:3' | '16:9') => void;
+  showGalleryCaptions?: boolean;
+  onShowGalleryCaptionsChange?: (show: boolean) => void;
 }
-
-import { useLanguage } from '../../hooks/useLanguage';
 
 export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> = ({
   images = [],
@@ -34,13 +38,19 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
   restaurantName,
   theme = 'light',
   customSettings,
+  galleryAspectRatio = '4:3',
+  onGalleryAspectRatioChange,
+  showGalleryCaptions = true,
+  onShowGalleryCaptionsChange,
 }) => {
   const { language } = useLanguage();
   const isDark = theme === 'dark';
   const [isUploading, setIsUploading] = useState(false);
   const [isAddingUrl, setIsAddingUrl] = useState(false);
+  const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [newUrl, setNewUrl] = useState('');
-  const [newTitle, setNewTitle] = useState('');
+  const [newTitlePt, setNewTitlePt] = useState('');
+  const [newTitleEn, setNewTitleEn] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -69,13 +79,17 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
           customSettings,
         });
 
+        const defaultTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
         const newImg: RestaurantGalleryImage = {
           id: `img-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
           url: res.secure_url,
-          title: file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+          title: defaultTitle,
+          titlePt: defaultTitle,
+          titleEn: defaultTitle,
           folder: res.folder,
           cloudinaryPublicId: res.public_id,
           createdAt: new Date().toISOString(),
+          isVisible: true,
         };
 
         addedImages.push(newImg);
@@ -84,49 +98,88 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
       onChange([...images, ...addedImages]);
       toast.success(
         addedImages.length === 1 
-          ? `Image uploaded to Cloudinary folder "${targetFolder}"!`
-          : `${addedImages.length} images uploaded to Cloudinary folder "${targetFolder}"!`
+          ? (language === 'pt' ? 'Imagem carregada para a pasta do Cloudinary!' : `Image uploaded to Cloudinary folder!`)
+          : `${addedImages.length} ${language === 'pt' ? 'imagens carregadas para o Cloudinary!' : 'images uploaded to Cloudinary!'}`
       );
     } catch (err: any) {
       console.error('[RestaurantGalleryManager] Upload error:', err);
-      toast.error(err?.message || 'Failed to upload image to Cloudinary.');
+      toast.error(err?.message || (language === 'pt' ? 'Erro ao carregar imagem para o Cloudinary.' : 'Failed to upload image to Cloudinary.'));
     } finally {
       setIsUploading(false);
       if (e.target) e.target.value = '';
     }
   };
 
-  const handleAddFromUrl = (e: React.FormEvent) => {
+  const handleOpenAddUrl = () => {
+    setEditingImageId(null);
+    setNewUrl('');
+    setNewTitlePt('');
+    setNewTitleEn('');
+    setIsAddingUrl(true);
+  };
+
+  const handleEditImage = (img: RestaurantGalleryImage) => {
+    setEditingImageId(img.id);
+    setNewUrl(img.url);
+    setNewTitlePt(img.titlePt || img.title || '');
+    setNewTitleEn(img.titleEn || img.title || '');
+    setIsAddingUrl(true);
+  };
+
+  const handleAddOrUpdateFromUrl = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUrl.trim()) {
-      toast.error('Please enter an image URL.');
+      toast.error(language === 'pt' ? 'Por favor, insira o URL da imagem.' : 'Please enter an image URL.');
       return;
     }
 
-    const newImg: RestaurantGalleryImage = {
-      id: `img-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
-      url: newUrl.trim(),
-      title: newTitle.trim() || 'Restaurant Photo',
-      folder: newUrl.includes('cloudinary.com') ? targetFolder : 'external',
-      createdAt: new Date().toISOString(),
-    };
+    const resolvedTitle = language === 'pt' ? (newTitlePt.trim() || newTitleEn.trim() || 'Foto do Restaurante') : (newTitleEn.trim() || newTitlePt.trim() || 'Restaurant Photo');
 
-    onChange([...images, newImg]);
+    if (editingImageId) {
+      // Update existing image
+      const updated = images.map(img => img.id === editingImageId ? {
+        ...img,
+        url: newUrl.trim(),
+        title: resolvedTitle,
+        titlePt: newTitlePt.trim(),
+        titleEn: newTitleEn.trim(),
+      } : img);
+      onChange(updated);
+      toast.success(language === 'pt' ? 'Imagem atualizada com sucesso!' : 'Image updated successfully!');
+    } else {
+      // Add new image
+      const newImg: RestaurantGalleryImage = {
+        id: `img-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+        url: newUrl.trim(),
+        title: resolvedTitle,
+        titlePt: newTitlePt.trim(),
+        titleEn: newTitleEn.trim(),
+        folder: newUrl.includes('cloudinary.com') ? targetFolder : 'external',
+        createdAt: new Date().toISOString(),
+        isVisible: true,
+      };
+      onChange([...images, newImg]);
+      toast.success(language === 'pt' ? 'Imagem adicionada à galeria!' : 'Image added to restaurant gallery!');
+    }
+
     setNewUrl('');
-    setNewTitle('');
+    setNewTitlePt('');
+    setNewTitleEn('');
+    setEditingImageId(null);
     setIsAddingUrl(false);
-    toast.success('Image added to restaurant gallery!');
   };
 
-  const handleRemoveImage = (id: string) => {
+  const handleRemoveImage = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     onChange(images.filter(img => img.id !== id));
-    toast.success('Image removed from gallery.');
+    toast.success(language === 'pt' ? 'Imagem removida da galeria.' : 'Image removed from gallery.');
   };
 
-  const handleCopyUrl = (url: string, id: string) => {
+  const handleCopyUrl = (url: string, id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     navigator.clipboard.writeText(url);
     setCopiedId(id);
-    toast.success('Image URL copied to clipboard!');
+    toast.success(language === 'pt' ? 'URL da imagem copiado!' : 'Image URL copied to clipboard!');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -135,8 +188,8 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
       "border rounded-2xl p-5 sm:p-6 space-y-5 transition-colors",
       isDark ? "bg-gray-800/40 border-gray-700/80" : "bg-white border-gray-200"
     )}>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-200 dark:border-gray-700">
+      {/* Header & Controls */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
         <div>
           <div className="flex items-center gap-2">
             <ImageIcon className="w-5 h-5 text-amber-500" />
@@ -150,19 +203,85 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             )}
           </div>
           <p className={cn("text-xs mt-1", isDark ? "text-gray-400" : "text-gray-500")}>
-            {language === 'pt' ? 'Carregue fotos de salas de jantar, pratos e ambiente. As imagens carregadas no Cloudinary são organizadas automaticamente em' : 'Upload photos of dining rooms, dishes, and ambience. Images uploaded to Cloudinary are automatically organized under'} <span className="font-mono text-amber-500 font-semibold">{targetFolder}</span>.
+            {language === 'pt' ? 'Gerencie fotos da galeria pública, rácio de aspeto e legendas.' : 'Manage public gallery photos, aspect ratio, and captions.'}
           </p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          {/* Add by URL toggle button */}
+        {/* Aspect Ratio & Caption Toggles */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Aspect Ratio Toggle */}
+          <div className={cn(
+            "flex items-center gap-1 p-1 rounded-xl border text-xs",
+            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-50 border-gray-300 text-gray-700"
+          )}>
+            <span className="text-[10px] font-semibold px-2 text-gray-400 uppercase">
+              {language === 'pt' ? 'Rácio:' : 'Ratio:'}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onGalleryAspectRatioChange?.('4:3');
+              }}
+              className={cn(
+                "px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer pointer-events-auto",
+                galleryAspectRatio === '4:3'
+                  ? "bg-amber-500 text-slate-950 shadow-xs"
+                  : "hover:bg-gray-200 dark:hover:bg-gray-800"
+              )}
+            >
+              4:3
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onGalleryAspectRatioChange?.('16:9');
+              }}
+              className={cn(
+                "px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer pointer-events-auto",
+                galleryAspectRatio === '16:9'
+                  ? "bg-amber-500 text-slate-950 shadow-xs"
+                  : "hover:bg-gray-200 dark:hover:bg-gray-800"
+              )}
+            >
+              16:9
+            </button>
+          </div>
+
+          {/* Show Captions Toggle */}
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs",
+            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-50 border-gray-300 text-gray-700"
+          )}>
+            <span className="text-[10px] font-semibold uppercase text-gray-400">
+              {language === 'pt' ? 'Legenda' : 'Caption'}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowGalleryCaptionsChange?.(!showGalleryCaptions);
+              }}
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none pointer-events-auto",
+                showGalleryCaptions ? "bg-amber-500" : (isDark ? "bg-gray-700" : "bg-gray-300")
+              )}
+            >
+              <span className={cn(
+                "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out",
+                showGalleryCaptions ? "translate-x-4" : "translate-x-0"
+              )} />
+            </button>
+          </div>
+
+          {/* Add via URL toggle button */}
           <button
             type="button"
-            onClick={() => setIsAddingUrl(!isAddingUrl)}
+            onClick={handleOpenAddUrl}
             className={cn(
               "px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border",
-              isAddingUrl
+              isAddingUrl && !editingImageId
                 ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600"
                 : isDark
                   ? "bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-700"
@@ -211,27 +330,38 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
         </div>
       </div>
 
-      {/* Add via URL Form Expandable */}
-      {isAddingUrl && (
-        <form onSubmit={handleAddFromUrl} className={cn(
-          "p-4 rounded-xl border space-y-3 animate-fade-in",
-          isDark ? "bg-gray-900/60 border-gray-700" : "bg-gray-50 border-gray-200"
-        )}>
+      {/* Add / Edit via URL Form Expandable */}
+      <AnimatePresence>
+        {isAddingUrl && (
+          <motion.form 
+            initial={{ opacity: 0, height: 0, scaleY: 0.95 }}
+            animate={{ opacity: 1, height: 'auto', scaleY: 1 }}
+            exit={{ opacity: 0, height: 0, scaleY: 0.95 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            onSubmit={handleAddOrUpdateFromUrl} 
+            className={cn(
+              "p-4 rounded-xl border space-y-3 shadow-md overflow-hidden",
+              isDark ? "bg-gray-900/90 border-gray-700" : "bg-gray-50 border-gray-200"
+            )}
+          >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5 uppercase tracking-wider">
               <Plus size={13} />
-              {language === 'pt' ? 'Adicionar Imagem via URL' : 'Add Image from URL'}
+              {editingImageId 
+                ? (language === 'pt' ? 'Editar Imagem via URL' : 'Edit Image via URL')
+                : (language === 'pt' ? 'Adicionar Imagem via URL' : 'Add Image from URL')
+              }
             </span>
             <button
               type="button"
-              onClick={() => setIsAddingUrl(false)}
+              onClick={() => { setIsAddingUrl(false); setEditingImageId(null); }}
               className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
             >
               {language === 'pt' ? 'Cancelar' : 'Cancel'}
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                 {language === 'pt' ? 'URL da Imagem *' : 'Image URL *'}
@@ -249,33 +379,68 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
               />
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                {language === 'pt' ? 'Legenda / Descrição (Opcional)' : 'Caption / Description (Optional)'}
-              </label>
-              <input
-                type="text"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="e.g. Main Dining Room, Homemade Pasta"
-                className={cn(
-                  "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
-                  isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
-                )}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  {language === 'pt' ? 'Legenda (PT)' : 'Caption (PT)'}
+                </label>
+                <input
+                  type="text"
+                  value={newTitlePt}
+                  onChange={(e) => setNewTitlePt(e.target.value)}
+                  placeholder="ex. Sala Principal"
+                  className={cn(
+                    "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
+                    isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                  )}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  {language === 'pt' ? 'Legenda (ENG)' : 'Caption (ENG)'}
+                </label>
+                <input
+                  type="text"
+                  value={newTitleEn}
+                  onChange={(e) => setNewTitleEn(e.target.value)}
+                  placeholder="e.g. Main Dining Room"
+                  className={cn(
+                    "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
+                    isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                  )}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2 pt-1">
+            {editingImageId && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleRemoveImage(editingImageId);
+                  setIsAddingUrl(false);
+                  setEditingImageId(null);
+                }}
+                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold text-xs rounded-lg transition-colors cursor-pointer border border-rose-500/30"
+              >
+                {language === 'pt' ? 'Eliminar' : 'Delete'}
+              </button>
+            )}
             <button
               type="submit"
               className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors cursor-pointer"
             >
-              {language === 'pt' ? 'Adicionar à Galeria' : 'Add to Gallery'}
+              {editingImageId 
+                ? (language === 'pt' ? 'Atualizar Imagem' : 'Update Image')
+                : (language === 'pt' ? 'Adicionar à Galeria' : 'Add to Gallery')
+              }
             </button>
           </div>
-        </form>
-      )}
+          </motion.form>
+        )}
+      </AnimatePresence>
 
       {/* Gallery Grid */}
       {images.length === 0 ? (
@@ -287,36 +452,40 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             <ImageIcon size={22} />
           </div>
           <p className={cn("text-xs font-semibold", isDark ? "text-gray-300" : "text-gray-700")}>
-            No gallery photos added yet for this restaurant
+            {language === 'pt' ? 'Nenhuma foto na galeria ainda' : 'No gallery photos added yet'}
           </p>
           <p className={cn("text-[11px] max-w-sm mx-auto mt-1", isDark ? "text-gray-500" : "text-gray-500")}>
-            Click <strong className="text-amber-500 font-semibold cursor-pointer" onClick={() => fileInputRef.current?.click()}>"Upload to Cloudinary"</strong> or <strong className="text-amber-500 font-semibold cursor-pointer" onClick={() => setIsAddingUrl(true)}>"Add via URL"</strong> to add restaurant images. Uploads are organized in Cloudinary under <span className="font-mono text-amber-500">{targetFolder}</span>.
+            {language === 'pt' ? 'Clique em "Carregar para Cloudinary" ou "Adicionar via URL" para começar.' : 'Click "Upload to Cloudinary" or "Add via URL" to add restaurant images.'}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
           {images.map((img) => {
             const isCloudinary = Boolean(img.url && img.url.includes('cloudinary.com'));
+            const aspectClass = galleryAspectRatio === '16:9' ? 'aspect-video' : 'aspect-[4/3]';
+            const displayTitle = language === 'pt' ? (img.titlePt || img.title || '') : (img.titleEn || img.title || '');
 
             return (
               <div
                 key={img.id}
+                onClick={() => handleEditImage(img)}
                 className={cn(
-                  "group relative rounded-xl border overflow-hidden flex flex-col transition-all hover:shadow-md",
+                  "group relative rounded-xl border overflow-hidden flex flex-col transition-all hover:shadow-lg cursor-pointer",
                   isDark ? "bg-gray-900/70 border-gray-700/80 hover:border-amber-500/50" : "bg-white border-gray-200 hover:border-amber-400"
                 )}
+                title={language === 'pt' ? 'Clique para editar' : 'Click to edit'}
               >
                 {/* Image Box */}
-                <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center">
+                <div className={cn(aspectClass, "w-full bg-slate-950 relative overflow-hidden flex items-center justify-center")}>
                   <img
                     src={img.url}
-                    alt={img.title || 'Restaurant image'}
+                    alt={displayTitle || 'Restaurant image'}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
                   />
 
                   {/* Visibility Checkbox */}
-                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-1 rounded backdrop-blur-sm">
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-1 rounded backdrop-blur-sm" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={img.isVisible ?? true}
@@ -326,7 +495,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
                       }}
                       className="w-3.5 h-3.5 rounded border-gray-600 text-amber-500 focus:ring-amber-500 cursor-pointer"
                     />
-                    <span className="text-[10px] text-white">{language === 'pt' ? 'Mostrar no Booking' : 'Show in Booking'}</span>
+                    <span className="text-[10px] text-white">{language === 'pt' ? 'Mostrar' : 'Show'}</span>
                   </div>
 
                   {/* Cloudinary Badge overlay */}
@@ -347,6 +516,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
                       href={img.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
                       className="p-1 rounded bg-slate-950/80 text-gray-300 hover:text-white backdrop-blur-sm transition-colors"
                       title="Open full size"
                     >
@@ -355,7 +525,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
 
                     <button
                       type="button"
-                      onClick={() => handleCopyUrl(img.url, img.id)}
+                      onClick={(e) => handleCopyUrl(img.url, img.id, e)}
                       className="p-1 rounded bg-slate-950/80 text-gray-300 hover:text-white backdrop-blur-sm transition-colors cursor-pointer"
                       title="Copy URL"
                     >
@@ -364,7 +534,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
 
                     <button
                       type="button"
-                      onClick={() => handleRemoveImage(img.id)}
+                      onClick={(e) => handleRemoveImage(img.id, e)}
                       className="p-1 rounded bg-slate-950/80 text-rose-400 hover:text-rose-300 backdrop-blur-sm transition-colors cursor-pointer"
                       title="Delete photo"
                     >
@@ -374,28 +544,25 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
                 </div>
 
                 {/* Caption / Title */}
-                <div className="p-2.5 flex-1 flex flex-col justify-between">
-                  <p className={cn(
-                    "text-xs font-semibold truncate",
-                    isDark ? "text-gray-200" : "text-gray-800"
-                  )} title={img.title || img.url}>
-                    {img.title || 'Untitled Photo'}
-                  </p>
+                {showGalleryCaptions && (
+                  <div className="p-2.5 flex-1 flex flex-col justify-between">
+                    <p className={cn(
+                      "text-xs font-semibold truncate",
+                      isDark ? "text-gray-200" : "text-gray-800"
+                    )} title={displayTitle || img.url}>
+                      {displayTitle || (language === 'pt' ? 'Sem legenda' : 'Untitled Photo')}
+                    </p>
 
-                  <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400">
-                    <span className="font-mono truncate max-w-[120px]">
-                      {img.folder || targetFolder}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveImage(img.id)}
-                      className="text-rose-500 hover:underline cursor-pointer font-medium"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400">
+                      <span className="font-mono truncate max-w-[120px]">
+                        {img.folder || targetFolder}
+                      </span>
+                      <span className="text-amber-500 font-medium group-hover:underline">
+                        {language === 'pt' ? 'Editar' : 'Edit'}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}

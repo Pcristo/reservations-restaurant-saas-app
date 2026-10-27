@@ -270,10 +270,131 @@ export async function listAllRestaurants(): Promise<Restaurant[]> {
     snap.forEach((docSnap) => {
       list.push({ id: docSnap.id, ...docSnap.data() } as Restaurant);
     });
+
+    const requiredSlugs = ['dinemaster-bistro', 'bela-italia', 'restaurant-test-3'];
+    const existingIds = new Set(list.map(r => r.id.toLowerCase()));
+    const existingSlugs = new Set(list.map(r => r.slug?.toLowerCase()));
+
+    // Seed Bela Itália if missing
+    if (!existingIds.has('bela-italia') && !existingSlugs.has('bela-italia')) {
+      const belaItalia: Restaurant = {
+        id: 'bela-italia',
+        name: 'Bela Itália',
+        slug: 'bela-italia',
+        subdomain: 'bela-italia',
+        email: 'manager@belaitalia.com',
+        phone: '+351 213 456 789',
+        address: 'Rua Augusta 120, Baixa',
+        city: 'Lisboa',
+        country: 'portugal',
+        timezone: 'Europe/Lisbon',
+        currency: 'EUR',
+        language: 'pt',
+        status: 'active',
+        planId: 'professional',
+        planName: 'Professional',
+        ownerEmail: 'admin@belaitalia.com',
+        ownerName: 'Marco Rossi',
+        ownerId: 'owner-bela-italia',
+        cuisine: 'Autêntica Cozinha Italiana & Pizze em Forno a Lenha',
+        description: 'Tradição italiana autêntica no coração de Lisboa. Ingredientes frescos, massas caseiras e pizzas artesanais.',
+        descriptionPt: 'Tradição italiana autêntica no coração de Lisboa. Ingredientes frescos, massas caseiras e pizzas artesanais.',
+        website: 'https://belaitalia.pt',
+        branding: {
+          primaryColor: '#059669',
+          secondaryColor: '#1e293b',
+          accentColor: '#dc2626',
+          displayName: 'Bela Itália',
+          theme: 'light',
+          buttonStyle: 'rounded',
+        },
+        seo: {
+          seoTitle: 'Bela Itália | Ristorante & Pizzeria em Lisboa',
+          seoTitlePt: 'Bela Itália | Ristorante & Pizzeria em Lisboa',
+          seoTitleEn: 'Bela Itália | Authentic Italian Restaurant & Pizzeria in Lisbon',
+          metaDescription: 'Reserve a sua mesa no Bela Itália em Lisboa. Autêntica cozinha italiana, massas frescas e pizzas artesanais.',
+          metaDescriptionPt: 'Reserve a sua mesa no Bela Itália em Lisboa. Autêntica cozinha italiana, massas frescas e pizzas artesanais.',
+          allowIndexing: true,
+          priceRange: '€€',
+          cuisineType: 'Italian',
+        },
+        stats: { totalReservations: 34, totalCustomers: 28, activeTables: 12, reservationsToday: 4 },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      list.push(belaItalia);
+      try {
+        await setDoc(doc(db, 'restaurants', 'bela-italia'), belaItalia, { merge: true });
+      } catch (e) {
+        console.warn('Notice seeding bela-italia:', e);
+      }
+    }
+
+    // Seed Restaurant Test 3 if missing
+    if (!existingIds.has('restaurant-test-3') && !existingSlugs.has('restaurant-test-3')) {
+      const restTest3: Restaurant = {
+        id: 'restaurant-test-3',
+        name: 'Restaurant Test 3',
+        slug: 'restaurant-test-3',
+        subdomain: 'restaurant-test-3',
+        email: 'test3@dinemaster.com',
+        phone: '+353 1 555 3333',
+        address: '45 Test Avenue',
+        city: 'Dublin',
+        country: 'ireland',
+        timezone: 'Europe/Dublin',
+        currency: 'EUR',
+        language: 'en',
+        status: 'active',
+        planId: 'business',
+        planName: 'Business',
+        ownerEmail: 'admin@restauranttest3.com',
+        ownerName: 'Test Manager 3',
+        ownerId: 'owner-rest-test-3',
+        cuisine: 'Modern Fusion & Grill',
+        description: 'Exclusive modern grill and cocktails in the heart of the city.',
+        website: 'https://restauranttest3.com',
+        branding: {
+          primaryColor: '#f59e0b',
+          secondaryColor: '#1e293b',
+          accentColor: '#10b981',
+          displayName: 'Restaurant Test 3',
+          theme: 'light',
+          buttonStyle: 'rounded',
+        },
+        seo: {
+          seoTitle: 'Restaurant Test 3 | Fine Dining & Grill',
+          metaDescription: 'Experience modern dining at Restaurant Test 3.',
+          allowIndexing: true,
+          priceRange: '€€€',
+          cuisineType: 'Fusion',
+        },
+        stats: { totalReservations: 18, totalCustomers: 15, activeTables: 10, reservationsToday: 2 },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      list.push(restTest3);
+      try {
+        await setDoc(doc(db, 'restaurants', 'restaurant-test-3'), restTest3, { merge: true });
+      } catch (e) {
+        console.warn('Notice seeding restaurant-test-3:', e);
+      }
+    }
+
+    if (list.length === 0) {
+      const defaultRest = getDefaultRestaurantData();
+      list.push(defaultRest);
+      try {
+        await setDoc(doc(db, 'restaurants', defaultRest.id), defaultRest, { merge: true });
+      } catch (seedErr) {
+        console.warn('[TenantService] Notice seeding default restaurant:', seedErr);
+      }
+    }
+
     return list;
   } catch (err) {
     console.error('[TenantService] Failed to list all restaurants:', err);
-    return [];
+    return [getDefaultRestaurantData()];
   }
 }
 

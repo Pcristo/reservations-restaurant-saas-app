@@ -5,7 +5,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { format, parseISO, addDays } from 'date-fns';
-import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard, CheckCircle2, LifeBuoy, Volume2, VolumeX, Play } from 'lucide-react';
+import { ChevronUp, MoreVertical, Save, Image as ImageIcon, Clock, MapPin, Phone, Mail, Plus, Trash2, MessageCircle, Globe, Music2, Share2, Calendar, Bell, Video, Copy, ExternalLink, Map, Lock, Unlock, Edit, RotateCcw, Trash, ArrowLeft, Cloud, Database, Eye, EyeOff, ChevronDown, Search, ChevronLeft, ChevronRight, X, ShieldCheck, Palette as PaletteIcon, AlertTriangle, Users, CreditCard, CheckCircle2, LifeBuoy, Volume2, VolumeX, Play, Receipt } from 'lucide-react';
 import { useReservations } from '../hooks/useReservations';
 import { useCustomers } from '../hooks/useCustomers';
 import { DAYS_OF_WEEK } from '../constants';
@@ -31,6 +31,7 @@ import { APP_CONFIG } from '../data/appConfig';
 import { useFeatureFlags } from '../services/featureFlagsService';
 import restaurantFloorPlan from '../assets/restaurant_floor-plan.jpg';
 import { isPackageFeatureEnabled } from '../services/entitlementsService';
+import { RestaurantSettingsBills } from '../features/billing/components/RestaurantSettingsBills';
 
 dayjs.extend(customParseFormat);
 
@@ -52,7 +53,7 @@ export default function AdminSettings() {
   const isSuperAdmin = isUserSuperAdmin(user?.email);
   const { t, language } = useLanguage();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'general' | 'branding' | 'domains' | 'media'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'branding' | 'domains' | 'media' | 'bills'>('general');
   const [formData, setFormData] = useState(settings);
   const [initialFormData, setInitialFormData] = useState<any>(null);
   const [newClosedDay, setNewClosedDay] = useState("");
@@ -703,6 +704,19 @@ export default function AdminSettings() {
             <ImageIcon size={14} />
             <span>Photos & Gallery</span>
           </button>
+
+          <button
+            onClick={() => { setActiveTab('bills'); setShowBin(false); setShowDataHistory(false); }}
+            className={cn(
+              "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer",
+              activeTab === 'bills' && !showBin && !showDataHistory
+                ? "bg-amber-500 text-white shadow-sm font-bold"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+            )}
+          >
+            <Receipt size={14} />
+            <span>{language === 'pt' ? 'Faturas & Cobranças' : 'Bills & Invoices'}</span>
+          </button>
           
           <button
             onClick={() => navigate(`${adminBase}/assistance`)}
@@ -716,7 +730,7 @@ export default function AdminSettings() {
             className="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-sm hover:from-amber-600 hover:to-amber-700"
           >
             <CreditCard size={14} />
-            <span>{language === 'pt' ? 'Faturação & Subscrição' : 'Billing & Membership'}</span>
+            <span>{language === 'pt' ? 'Painel de Faturação' : 'Billing & Membership'}</span>
           </button>
         </div>
 
@@ -871,6 +885,15 @@ export default function AdminSettings() {
             customSettings={formData}
           />
         </div>
+      )}
+
+      {activeTab === 'bills' && !showBin && !showDataHistory && (
+        <RestaurantSettingsBills
+          restaurantId={currentSlug || tenant?.slug || 'restaurant'}
+          restaurantSettings={formData || settings}
+          theme={settings?.theme}
+          adminBase={adminBase}
+        />
       )}
 
       {activeTab === 'general' && !showBin && !showDataHistory && (
@@ -2413,6 +2436,36 @@ export default function AdminSettings() {
                 />
               </div>
             </div>
+
+            <div>
+              <label className={cn(
+                "block text-sm font-medium mb-1",
+                settings?.theme === 'dark' ? "text-gray-300" : "text-gray-700"
+              )}>{language === 'pt' ? 'Margem Superior do Logo' : 'Logo Top Margin'}</label>
+              <div className="space-y-2">
+                <div className={cn(
+                  "flex justify-between text-xs transition-colors",
+                  settings?.theme === 'dark' ? "text-gray-400" : "text-gray-500"
+                )}>
+                  <span>{language === 'pt' ? 'Ajustar alinhamento vertical superior/inferior' : 'Adjust vertical top/bottom alignment offset'}</span>
+                  <span className="font-mono font-bold">{formData.logoTopMargin ?? 0}px</span>
+                </div>
+                <input 
+                  type="range"
+                  min="-20"
+                  max="30"
+                  step="1"
+                  value={formData.logoTopMargin ?? 0}
+                  onChange={(e) => setFormData({ ...formData, logoTopMargin: parseInt(e.target.value) })}
+                  className={cn(
+                    "w-full h-2 rounded-lg appearance-none cursor-pointer accent-amber-600 transition-colors",
+                    settings?.theme === 'dark' ? "bg-gray-800" : "bg-gray-200"
+                  )}
+                />
+              </div>
+            </div>
+
+
 
             {/* Show Logo Switch */}
             <div className={cn(

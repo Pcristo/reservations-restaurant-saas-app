@@ -11,6 +11,7 @@ import {
 import { Invoice, SavedPaymentMethod } from '../../../types';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../hooks/useLanguage';
+import { getDisplayInvoiceNumber } from '../utils/invoiceNaming';
 
 interface PayInvoiceModalProps {
   isOpen: boolean;
@@ -112,7 +113,7 @@ export const PayInvoiceModal: React.FC<PayInvoiceModalProps> = ({
                 {language === 'pt' ? 'Pagar Fatura' : 'Pay Outstanding Invoice'}
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {invoice.invoiceNumber} • {formatCurrency(invoice.total, invoice.currency)}
+                {getDisplayInvoiceNumber(invoice.invoiceNumber, invoice.id)} • {formatCurrency(invoice.total, invoice.currency)}
               </p>
             </div>
           </div>

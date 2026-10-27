@@ -148,7 +148,8 @@ const Preloader: React.FC<PreloaderProps> = ({
               <img 
                 src={getOptimizedUrl(settings?.logoUrl, settings, 'logo')} 
                 alt={settings?.name || "Logo"} 
-                className="max-w-full max-h-full object-contain"
+                className="w-24 h-24 object-contain"
+                style={{ maxHeight: '96px', maxWidth: '96px' }}
                 referrerPolicy="no-referrer"
               />
             ) : (

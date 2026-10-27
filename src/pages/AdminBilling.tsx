@@ -13,7 +13,9 @@ import {
   HelpCircle,
   Download,
   CheckCircle2,
-  Lock
+  Lock,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../hooks/useAuth';
@@ -37,7 +39,8 @@ import {
   reactivateSubscription, 
   payInvoice, 
   addPaymentMethod, 
-  deletePaymentMethod 
+  deletePaymentMethod,
+  deleteInvoice 
 } from '../services/billingService';
 import { BillingSummaryCards } from '../features/billing/components/BillingSummaryCards';
 import { SubscriptionDetailsCard } from '../features/billing/components/SubscriptionDetailsCard';
@@ -47,8 +50,10 @@ import { InvoiceDetailModal } from '../features/billing/components/InvoiceDetail
 import { PayInvoiceModal } from '../features/billing/components/PayInvoiceModal';
 import { ChangePlanModal } from '../features/billing/components/ChangePlanModal';
 import { CancelSubscriptionModal } from '../features/billing/components/CancelSubscriptionModal';
+import { CreateInvoiceModal } from '../features/billing/components/CreateInvoiceModal';
 import { PaymentMethodsSection } from '../features/billing/components/PaymentMethodsSection';
 import { TransactionHistorySection } from '../features/billing/components/TransactionHistorySection';
+import { getDisplayInvoiceNumber } from '../features/billing/utils/invoiceNaming';
 
 export default function AdminBilling() {
   const { slug } = useParams<{ slug?: string }>();
@@ -78,6 +83,9 @@ export default function AdminBilling() {
   const [targetFrequency, setTargetFrequency] = useState<BillingFrequency>('monthly');
   const [isChangePlanModalOpen, setIsChangePlanModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isCreateInvoiceModalOpen, setIsCreateInvoiceModalOpen] = useState(false);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
+  const [isDeletingInvoice, setIsDeletingInvoice] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Load Billing Data
@@ -209,6 +217,39 @@ export default function AdminBilling() {
     }
   };
 
+  // Handle confirm delete invoice
+  const handleConfirmDeleteInvoice = async () => {
+    if (!invoiceToDelete) return;
+    setIsDeletingInvoice(true);
+    try {
+      await deleteInvoice(invoiceToDelete.id, currentSlug);
+      toast.success(
+        language === 'en'
+          ? `Invoice ${getDisplayInvoiceNumber(invoiceToDelete.invoiceNumber, invoiceToDelete.id, 'en')} deleted successfully!`
+          : `Fatura ${getDisplayInvoiceNumber(invoiceToDelete.invoiceNumber, invoiceToDelete.id, 'pt')} eliminada com sucesso!`
+      );
+      // Immediate local state update for snappy offline-first response
+      setOverview((prev) => {
+        if (!prev) return prev;
+        const updatedInvoices = prev.invoices.filter(i => i.id !== invoiceToDelete.id);
+        const unpaid = updatedInvoices.filter(i => i.status !== 'paid');
+        return {
+          ...prev,
+          invoices: updatedInvoices,
+          unpaidInvoicesCount: unpaid.length,
+          outstandingBalance: unpaid.reduce((sum, i) => sum + (Number(i.total) || 0), 0)
+        };
+      });
+      setInvoiceToDelete(null);
+      await loadData();
+    } catch (err: any) {
+      console.error('[AdminBilling] Delete invoice error:', err);
+      toast.error(err?.message || 'Failed to delete invoice');
+    } finally {
+      setIsDeletingInvoice(false);
+    }
+  };
+
   return (
     <div className={cn(
       "min-h-screen py-8 px-4 sm:px-6 lg:px-8 transition-colors duration-300",
@@ -247,6 +288,14 @@ export default function AdminBilling() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsCreateInvoiceModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+            >
+              <Plus size={14} />
+              <span>{language === 'pt' ? 'Criar Fatura' : 'Create Invoice'}</span>
+            </button>
             <button
               onClick={() => loadData(true)}
               disabled={isRefreshing}
@@ -415,6 +464,8 @@ export default function AdminBilling() {
                   invoices={overview.invoices.slice(0, 5)}
                   onViewInvoice={(inv) => setSelectedInvoiceForDetail(inv)}
                   onPayInvoice={(inv) => setSelectedInvoiceForPayment(inv)}
+                  onCreateInvoice={() => setIsCreateInvoiceModalOpen(true)}
+                  onDeleteInvoice={(inv) => setInvoiceToDelete(inv)}
                 />
               </div>
             )}
@@ -447,6 +498,8 @@ export default function AdminBilling() {
                 invoices={overview.invoices}
                 onViewInvoice={(inv) => setSelectedInvoiceForDetail(inv)}
                 onPayInvoice={(inv) => setSelectedInvoiceForPayment(inv)}
+                onCreateInvoice={() => setIsCreateInvoiceModalOpen(true)}
+                onDeleteInvoice={(inv) => setInvoiceToDelete(inv)}
               />
             )}
 
@@ -491,6 +544,10 @@ export default function AdminBilling() {
             setSelectedInvoiceForDetail(null);
             setSelectedInvoiceForPayment(inv);
           }}
+          onDeleteInvoice={(inv) => {
+            setSelectedInvoiceForDetail(null);
+            setInvoiceToDelete(inv);
+          }}
         />
 
         <PayInvoiceModal
@@ -520,6 +577,71 @@ export default function AdminBilling() {
             onConfirm={handleConfirmCancel}
             isLoading={isActionLoading}
           />
+        )}
+
+        <CreateInvoiceModal
+          isOpen={isCreateInvoiceModalOpen}
+          onClose={() => setIsCreateInvoiceModalOpen(false)}
+          restaurantId={currentSlug}
+          restaurantSettings={settings}
+          defaultPlanId={overview?.currentPlan?.id || 'professional'}
+          currentLanguage={language === 'pt' ? 'pt' : 'en'}
+          onInvoiceCreated={async () => {
+            await loadData();
+          }}
+        />
+
+        {/* Delete Invoice Confirmation Modal */}
+        {invoiceToDelete && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                    {language === 'pt' ? 'Eliminar Fatura' : 'Delete Invoice'}
+                  </h3>
+                  <p className="text-xs text-gray-500 font-mono">
+                    {getDisplayInvoiceNumber(invoiceToDelete.invoiceNumber, invoiceToDelete.id, language === 'en' ? 'en' : 'pt')}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                {language === 'pt'
+                  ? `Tem a certeza de que deseja eliminar esta fatura no valor de €${(invoiceToDelete.total || invoiceToDelete.subtotal || 0).toFixed(2)}? Esta ação removerá a fatura permanentemente.`
+                  : `Are you sure you want to delete this invoice for €${(invoiceToDelete.total || invoiceToDelete.subtotal || 0).toFixed(2)}? This action cannot be undone.`}
+              </p>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceToDelete(null)}
+                  disabled={isDeletingInvoice}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {language === 'pt' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteInvoice}
+                  disabled={isDeletingInvoice}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 active:scale-95"
+                >
+                  {isDeletingInvoice ? (
+                    <span>{language === 'pt' ? 'A eliminar...' : 'Deleting...'}</span>
+                  ) : (
+                    <>
+                      <Trash2 size={13} />
+                      <span>{language === 'pt' ? 'Eliminar Fatura' : 'Delete Invoice'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

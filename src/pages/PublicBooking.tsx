@@ -2260,40 +2260,67 @@ export default function PublicBooking() {
             {language === 'pt' ? 'Galeria de Fotos' : 'Photo Gallery'}
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {settings.galleryImages.filter(img => img.isVisible !== false).map((img, index) => (
-              <button
-                key={img.id || index}
-                onClick={() => { setSelectedImageIndex(index); setIsGalleryOpen(true); }}
-                className="aspect-square rounded-xl overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
-              >
-                <img src={getOptimizedUrl(img.url, settings, 'gallery')} alt={img.title || 'Gallery image'} className="w-full h-full object-cover" />
-              </button>
-            ))}
+            {settings.galleryImages.filter(img => img.isVisible !== false).map((img, index) => {
+              const aspectClass = settings.galleryAspectRatio === '16:9' ? 'aspect-video' : 'aspect-[4/3]';
+              const displayCaption = language === 'pt' ? (img.titlePt || img.title || '') : (img.titleEn || img.title || '');
+              return (
+                <div
+                  key={img.id || index}
+                  onClick={() => { setSelectedImageIndex(index); setIsGalleryOpen(true); }}
+                  className={cn(
+                    "group rounded-xl overflow-hidden cursor-pointer hover:opacity-95 transition-all shadow-sm border border-slate-200 bg-white flex flex-col",
+                    aspectClass
+                  )}
+                >
+                  <div className="flex-1 w-full relative overflow-hidden bg-slate-950">
+                    <img src={getOptimizedUrl(img.url, settings, 'gallery')} alt={displayCaption || 'Gallery image'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                  </div>
+                  {settings.showGalleryCaptions !== false && displayCaption && (
+                    <div className="p-2 bg-white border-t border-slate-100 text-xs font-semibold text-slate-800 truncate">
+                      {displayCaption}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Lightbox Modal */}
       <AnimatePresence>
-        {isGalleryOpen && settings?.galleryImages && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4"
-            onClick={() => setIsGalleryOpen(false)}
-          >
-            <button className="absolute top-4 right-4 text-white p-2" onClick={() => setIsGalleryOpen(false)}><X size={32} /></button>
-            <button className="absolute left-4 text-white p-2" onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(prev => (prev - 1 + settings.galleryImages!.filter(img => img.isVisible !== false).length) % settings.galleryImages!.filter(img => img.isVisible !== false).length); }}><ChevronLeft size={48} /></button>
-            <img 
-              src={getOptimizedUrl(settings.galleryImages.filter(img => img.isVisible !== false)[selectedImageIndex].url, settings, 'gallery')} 
-              alt="Full size" 
-              className="max-w-full max-h-[80vh] object-contain"
-              onClick={(e) => e.stopPropagation()}
-            />
-            <button className="absolute right-4 text-white p-2" onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(prev => (prev + 1) % settings.galleryImages!.filter(img => img.isVisible !== false).length); }}><ChevronRight size={48} /></button>
-          </motion.div>
-        )}
+        {isGalleryOpen && settings?.galleryImages && (() => {
+          const visibleImages = settings.galleryImages.filter(img => img.isVisible !== false);
+          const currentImg = visibleImages[selectedImageIndex];
+          const displayCaption = language === 'pt' ? (currentImg?.titlePt || currentImg?.title || '') : (currentImg?.titleEn || currentImg?.title || '');
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4"
+              onClick={() => setIsGalleryOpen(false)}
+            >
+              <button className="absolute top-4 right-4 text-white p-2" onClick={() => setIsGalleryOpen(false)}><X size={32} /></button>
+              <button className="absolute left-4 text-white p-2" onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(prev => (prev - 1 + visibleImages.length) % visibleImages.length); }}><ChevronLeft size={48} /></button>
+              
+              <div className="flex flex-col items-center justify-center max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                <img 
+                  src={getOptimizedUrl(currentImg.url, settings, 'gallery')} 
+                  alt={displayCaption || 'Full size'} 
+                  className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl"
+                />
+                {settings.showGalleryCaptions !== false && displayCaption && (
+                  <div className="mt-4 px-6 py-2 bg-black/75 backdrop-blur-md border border-white/10 rounded-full text-white text-sm sm:text-base font-medium shadow-lg text-center max-w-xl truncate">
+                    {displayCaption}
+                  </div>
+                )}
+              </div>
+
+              <button className="absolute right-4 text-white p-2" onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(prev => (prev + 1) % visibleImages.length); }}><ChevronRight size={48} /></button>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

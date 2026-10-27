@@ -9,23 +9,30 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Invoice } from '../../../types';
 import { cn } from '../../../lib/utils';
 import { downloadInvoicePdf } from '../../../services/billingService';
+import { getDisplayInvoiceNumber } from '../utils/invoiceNaming';
 import { useLanguage } from '../../../hooks/useLanguage';
 
 interface InvoicesTableProps {
   invoices: Invoice[];
   onViewInvoice: (invoice: Invoice) => void;
   onPayInvoice: (invoice: Invoice) => void;
+  onCreateInvoice?: () => void;
+  onDeleteInvoice?: (invoice: Invoice) => void;
 }
 
 export const InvoicesTable: React.FC<InvoicesTableProps> = ({
   invoices,
   onViewInvoice,
   onPayInvoice,
+  onCreateInvoice,
+  onDeleteInvoice,
 }) => {
   const { language } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,7 +50,9 @@ export const InvoicesTable: React.FC<InvoicesTableProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesNumber = inv.invoiceNumber.toLowerCase().includes(q);
+        const invoiceLang = inv.language || (language === 'en' ? 'en' : 'pt');
+        const matchesNumber = (inv.invoiceNumber || '').toLowerCase().includes(q) || 
+          getDisplayInvoiceNumber(inv.invoiceNumber, inv.id, invoiceLang).toLowerCase().includes(q);
         const matchesPlan = (inv.planName || '').toLowerCase().includes(q);
         const matchesPeriod = (inv.billingPeriod || '').toLowerCase().includes(q);
         if (!matchesNumber && !matchesPlan && !matchesPeriod) return false;
@@ -119,6 +128,17 @@ export const InvoicesTable: React.FC<InvoicesTableProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {onCreateInvoice && (
+            <button
+              type="button"
+              onClick={onCreateInvoice}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+            >
+              <Plus size={13} />
+              <span>{language === 'pt' ? 'Criar Fatura' : 'Create Invoice'}</span>
+            </button>
+          )}
+
           {/* Search Input */}
           <div className="relative">
             <input
@@ -195,7 +215,7 @@ export const InvoicesTable: React.FC<InvoicesTableProps> = ({
                   className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors group"
                 >
                   <td className="py-3.5 px-3 font-mono font-bold text-gray-900 dark:text-white">
-                    {inv.invoiceNumber}
+                    {getDisplayInvoiceNumber(inv.invoiceNumber, inv.id, inv.language || (language === 'en' ? 'en' : 'pt'))}
                   </td>
                   <td className="py-3.5 px-3 text-gray-500">
                     {formatDate(inv.issueDate)}
@@ -233,18 +253,41 @@ export const InvoicesTable: React.FC<InvoicesTableProps> = ({
                       <button
                         onClick={() => onViewInvoice(inv)}
                         className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                        title={language === 'pt' ? 'Ver Fatura' : 'View Invoice'}
+                        title={language === 'pt' ? 'Ver Detalhes da Fatura' : 'View Invoice Details'}
                       >
                         <Eye size={14} />
                       </button>
 
                       <button
-                        onClick={() => downloadInvoicePdf(inv)}
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                        title={language === 'pt' ? 'Descarregar PDF' : 'Download PDF'}
+                        type="button"
+                        onClick={() => downloadInvoicePdf(inv, 'pt')}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-700 hover:border-amber-500/40 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-amber-700 dark:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Descarregar Fatura em Português (PT-PT)"
                       >
-                        <Download size={14} />
+                        <Download size={11} />
+                        <span>PDF (PT-PT)</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadInvoicePdf(inv, 'en')}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-700 hover:border-indigo-500/40 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Download Invoice in English (EN)"
+                      >
+                        <Download size={11} />
+                        <span>PDF (EN)</span>
+                      </button>
+
+                      {onDeleteInvoice && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteInvoice(inv)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          title={language === 'pt' ? 'Apagar Fatura' : 'Delete Invoice'}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

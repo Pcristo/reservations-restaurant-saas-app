@@ -23,6 +23,8 @@ export interface RestaurantGalleryImage {
   id: string;
   url: string;
   title?: string;
+  titlePt?: string;
+  titleEn?: string;
   caption?: string;
   folder?: string;
   cloudinaryPublicId?: string;
@@ -124,6 +126,7 @@ export interface RestaurantSettings {
   socialLinks?: { platform: 'facebook' | 'instagram' | 'tiktok' | 'youtube' | 'tripadvisor', url: string }[];
   logoUrl?: string;
   logoSize?: number;
+  logoTopMargin?: number;
   showLogo?: boolean;
   showRestaurantName?: boolean;
   faviconUrl?: string;
@@ -179,6 +182,8 @@ export interface RestaurantSettings {
   cloudinaryApiKey?: string;
   useCloudinary?: boolean;
   galleryImages?: RestaurantGalleryImage[];
+  galleryAspectRatio?: '4:3' | '16:9';
+  showGalleryCaptions?: boolean;
   dataHistoryPassword?: string;
   appUnlockPin?: string;
   protectPdfWithPassword?: boolean;

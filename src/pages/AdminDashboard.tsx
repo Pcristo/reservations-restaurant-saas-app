@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import React, { useState } from 'react';
 import { useReservations } from '../hooks/useReservations';
-import { useSmartAlerts } from '../hooks/useSmartAlerts';
+import { useSmartAlerts, SmartAlert } from '../hooks/useSmartAlerts';
 import { useTables } from '../hooks/useTables';
 import { useCustomers } from '../hooks/useCustomers';
 import { useUsers } from '../hooks/useUsers';
@@ -1699,7 +1699,7 @@ const FloorPlanFilterDropdown: React.FC<{
                   );
                 }
 
-                const renderGroup = (title, alerts) => {
+                const renderGroup = (title: string, alerts: SmartAlert[]) => {
                   if (alerts.length === 0) return null;
                   return (
                     <div className="mb-6">
@@ -1710,10 +1710,10 @@ const FloorPlanFilterDropdown: React.FC<{
                             {alerts.length}
                           </span>
                         </h3>
-                        <hr className="flex-grow border-t border-gray-300 dark:border-gray-700" />
+                        <hr className="grow border-t border-gray-300 dark:border-gray-700" />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
-                        {alerts.map(alert => (
+                        {alerts.map((alert: SmartAlert) => (
                           <div key={alert.id} className={cn("p-4 rounded-xl border shadow-sm", (alert.status === 'dismissed' || alert.status === 'resolved') ? "border-gray-600/50 bg-gray-800" : "border-[#27304b]/50 bg-[#27304b]")}>
                             <div className="flex flex-col gap-3">
                               <div className="flex justify-between items-start">
@@ -2509,7 +2509,7 @@ const FloorPlanFilterDropdown: React.FC<{
                           {language === 'pt' ? 'Pacote Ativo' : 'Active Package'}
                         </span>
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800">
-                          {tenant.tenant?.subscription?.billingFrequency === 'annual'
+                          {tenant?.tenant?.subscription?.billingFrequency === 'annual'
                             ? (language === 'pt' ? 'Faturação Anual' : 'Annual Billing')
                             : (language === 'pt' ? 'Faturação Mensal' : 'Monthly Billing')}
                         </span>
@@ -2555,7 +2555,7 @@ const FloorPlanFilterDropdown: React.FC<{
                       </span>
                     </div>
                     <span className="text-sm font-black text-gray-900 dark:text-white">
-                      {bookingUsage?.used ?? 0} / {formatResourceAllowance(tenant.entitlements, 'bookings', language)}
+                      {bookingUsage?.used ?? 0} / {formatResourceAllowance(tenant?.entitlements, 'bookings', language)}
                     </span>
                   </div>
 
@@ -2604,7 +2604,7 @@ const FloorPlanFilterDropdown: React.FC<{
                       </span>
                     </div>
                     <span className="text-sm font-black text-gray-900 dark:text-white">
-                      {activeStaffCount ?? users.length} / {formatResourceAllowance(tenant.entitlements, 'staff', language)}
+                      {activeStaffCount ?? users.length} / {formatResourceAllowance(tenant?.entitlements, 'staff', language)}
                     </span>
                   </div>
 
@@ -2650,7 +2650,7 @@ const FloorPlanFilterDropdown: React.FC<{
                       </span>
                     </div>
                     <span className="text-sm font-black text-gray-900 dark:text-white">
-                      {tables.length} / {formatResourceAllowance(tenant.entitlements, 'tables', language)}
+                      {tables.length} / {formatResourceAllowance(tenant?.entitlements, 'tables', language)}
                     </span>
                   </div>
 
@@ -2700,7 +2700,7 @@ const FloorPlanFilterDropdown: React.FC<{
                   { key: 'advancedAnalytics', en: 'Advanced Analytics', pt: 'Análises Avançadas' },
                   { key: 'apiAccess', en: 'API Webhooks', pt: 'API REST & Webhooks' },
                 ].map((feat) => {
-                  const enabled = isPackageFeatureEnabled(tenant.entitlements, feat.key as any);
+                  const enabled = isPackageFeatureEnabled(tenant?.entitlements, feat.key as any);
                   return (
                     <span
                       key={feat.key}

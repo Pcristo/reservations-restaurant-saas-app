@@ -6,7 +6,13 @@ import {
   SavedPaymentMethod,
   BillingFrequency
 } from '../types';
-import { generateInvoicePdf } from '../features/billing/utils/invoicePdfGenerator';
+import { 
+  generateInvoicePdf, 
+  formatInvoiceName, 
+  getInvoicePdfFilename,
+  generateCleanInvoiceNumber,
+  getDisplayInvoiceNumber 
+} from '../features/billing/utils/invoicePdfGenerator';
 import { DEFAULT_PLANS } from '../data/plans';
 import { doc, deleteDoc, collection, getDocs, query, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -79,7 +85,7 @@ export async function fetchBillingOverview(restaurantId: string): Promise<Billin
       date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
       amount: currentPlan.priceMonthly * 1.23,
       currency: 'EUR',
-      invoiceNumber: `INV-${now.getFullYear()}-001`,
+      invoiceNumber: generateCleanInvoiceNumber(new Date(now.getFullYear(), now.getMonth(), 1), 'pt'),
       transactionReference: 'tx_dmp_demo_offline',
       paymentMethod: 'Visa ending in 4242',
     },
@@ -271,12 +277,64 @@ export async function deletePaymentMethod(restaurantId: string, methodId: string
   }
 }
 
-export async function deleteInvoice(invoiceId: string): Promise<void> {
-  const res = await fetch(`/api/billing/invoices/${encodeURIComponent(invoiceId)}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    throw new Error('Failed to delete invoice');
+export async function deleteInvoice(invoiceId: string, restaurantId?: string): Promise<void> {
+  const cleanId = String(invoiceId || '').trim();
+  if (!cleanId) return;
+
+  // 1. Immediately remove from local offline caches
+  try {
+    const cached = localStorage.getItem('dinemaster_invoices_cache');
+    if (cached) {
+      const parsed: Invoice[] = JSON.parse(cached);
+      const filtered = parsed.filter(i => i.id !== cleanId && i.invoiceNumber !== cleanId);
+      localStorage.setItem('dinemaster_invoices_cache', JSON.stringify(filtered));
+    }
+  } catch (cacheErr) {
+    console.warn('[billingService] Failed to clean dinemaster_invoices_cache:', cacheErr);
+  }
+
+  if (restaurantId) {
+    try {
+      const cleanRestId = restaurantId.toLowerCase().trim();
+      const overviewCacheKey = `dinemaster_billing_${cleanRestId}`;
+      const cachedOverview = localStorage.getItem(overviewCacheKey);
+      if (cachedOverview) {
+        const parsed = JSON.parse(cachedOverview);
+        if (Array.isArray(parsed.invoices)) {
+          parsed.invoices = parsed.invoices.filter((i: any) => i.id !== cleanId && i.invoiceNumber !== cleanId);
+          const unpaid = parsed.invoices.filter((i: any) => i.status !== 'paid');
+          parsed.unpaidInvoicesCount = unpaid.length;
+          parsed.outstandingBalance = unpaid.reduce((sum: number, i: any) => sum + (Number(i.total) || 0), 0);
+          localStorage.setItem(overviewCacheKey, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('[billingService] Failed to clean restaurant overview cache:', e);
+    }
+  }
+
+  // 2. Call API endpoint
+  let apiSuccess = false;
+  try {
+    const res = await fetch(`/api/billing/delete-invoice?id=${encodeURIComponent(cleanId)}${restaurantId ? `&restaurantId=${encodeURIComponent(restaurantId)}` : ''}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: cleanId, restaurantId }),
+    });
+    if (res.ok) {
+      apiSuccess = true;
+    }
+  } catch (apiErr) {
+    console.warn('[billingService] API delete invoice network error:', apiErr);
+  }
+
+  // 3. Fallback: Direct Firestore deletion if client has permission
+  try {
+    await deleteDoc(doc(db, 'invoices', cleanId));
+  } catch (dbErr) {
+    if (!apiSuccess) {
+      console.warn('[billingService] Direct Firestore delete failed:', dbErr);
+    }
   }
 }
 
@@ -385,27 +443,75 @@ export async function listTransactions(): Promise<PaymentTransaction[]> {
 }
 
 /**
- * Generates and downloads real PDF invoice with print-ready layout.
+ * Generates and downloads real PDF invoice with print-ready layout in English or Portuguese.
  */
-export function downloadInvoicePdf(invoice: Invoice) {
-  return generateInvoicePdf(invoice, { autoDownload: true });
+export function downloadInvoicePdf(invoice: Invoice, language?: 'en' | 'pt') {
+  const chosenLang = language || invoice.language || 'pt';
+  return generateInvoicePdf(invoice, { autoDownload: true, language: chosenLang });
 }
 
-export async function createManualInvoice(invoiceData: {
+export interface CreateManualInvoiceInput {
   restaurantId: string;
   restaurantName: string;
+  restaurantLegalName?: string;
+  restaurantAddress?: string;
+  restaurantCity?: string;
+  restaurantCountry?: string;
+  restaurantPostalCode?: string;
+  restaurantVatNumber?: string;
   customerEmail: string;
   amount: number;
-  currency: string;
+  currency?: string;
+  taxRate?: number;
+  taxAmount?: number;
+  total?: number;
+  issueDate?: string;
   dueDate: string;
+  billingPeriod?: string;
+  status?: 'paid' | 'unpaid' | 'pending' | 'overdue' | 'void';
   notes?: string;
   selectedPlanId?: string;
-}): Promise<Invoice> {
+  planName?: string;
+  language?: 'en' | 'pt';
+  invoiceNumber?: string;
+  lineItems?: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    amount: number;
+    periodStart?: string;
+  }>;
+}
+
+export async function createManualInvoice(invoiceData: CreateManualInvoiceInput): Promise<Invoice> {
+  const cleanId = (invoiceData.restaurantId || 'bela-italia').toLowerCase().trim();
+  const subtotal = Number(invoiceData.amount) || 0;
+  const taxRate = typeof invoiceData.taxRate === 'number' ? invoiceData.taxRate : 23;
+  const taxAmount = invoiceData.taxAmount !== undefined 
+    ? Number(invoiceData.taxAmount) 
+    : Math.round(subtotal * (taxRate / 100) * 100) / 100;
+  const total = invoiceData.total !== undefined 
+    ? Number(invoiceData.total) 
+    : Math.round((subtotal + taxAmount) * 100) / 100;
+
+  const payload = {
+    ...invoiceData,
+    restaurantId: cleanId,
+    amount: subtotal,
+    taxRate,
+    taxAmount,
+    total,
+    currency: invoiceData.currency || 'EUR',
+    language: invoiceData.language || 'pt',
+    status: invoiceData.status || 'unpaid',
+  };
+
   try {
     const res = await fetch('/api/billing/create-invoice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(invoiceData),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (res.ok && data.success && data.invoice) {
@@ -421,41 +527,42 @@ export async function createManualInvoice(invoiceData: {
     console.warn('[billingService] API createInvoice failed, falling back to local creation:', err);
   }
 
-  const invoiceId = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const subtotal = Number(invoiceData.amount) || 0;
-  const taxRate = 23;
-  const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
-  const total = Math.round((subtotal + taxAmount) * 100) / 100;
+  const invoiceId = invoiceData.invoiceNumber || generateCleanInvoiceNumber(invoiceData.issueDate, invoiceData.language);
+  const defaultLineItem = {
+    id: `li-${Date.now()}`,
+    description: invoiceData.notes || (invoiceData.selectedPlanId ? `Subscription Plan Package: ${invoiceData.selectedPlanId}` : 'Manual Invoice'),
+    quantity: 1,
+    unitPrice: subtotal,
+    amount: subtotal,
+    periodStart: invoiceData.billingPeriod,
+  };
 
   const newInvoice: Invoice = {
     id: invoiceId,
     invoiceNumber: invoiceId,
-    restaurantId: invoiceData.restaurantId,
-    restaurantName: invoiceData.restaurantName || invoiceData.restaurantId,
-    restaurantLegalName: invoiceData.restaurantName || invoiceData.restaurantId,
-    restaurantAddress: '123 Restaurant St',
+    restaurantId: cleanId,
+    restaurantName: invoiceData.restaurantName || cleanId,
+    restaurantLegalName: invoiceData.restaurantLegalName || invoiceData.restaurantName || cleanId,
+    restaurantAddress: invoiceData.restaurantAddress || '123 Restaurant St',
+    restaurantCity: invoiceData.restaurantCity || '',
+    restaurantCountry: invoiceData.restaurantCountry || 'Portugal',
+    restaurantPostalCode: invoiceData.restaurantPostalCode || '',
+    restaurantVatNumber: invoiceData.restaurantVatNumber || '',
     customerEmail: invoiceData.customerEmail || 'billing@restaurant.com',
     planId: invoiceData.selectedPlanId || 'professional',
-    planName: invoiceData.selectedPlanId ? invoiceData.selectedPlanId.toUpperCase() : 'Professional',
-    billingPeriod: `${new Date().toLocaleDateString()} – ${invoiceData.dueDate}`,
+    planName: invoiceData.planName || (invoiceData.selectedPlanId ? invoiceData.selectedPlanId.toUpperCase() : 'Professional'),
+    billingPeriod: invoiceData.billingPeriod || `${new Date().toLocaleDateString('pt-PT')} – ${invoiceData.dueDate}`,
     subtotal,
     taxRate,
     taxAmount,
     total,
     currency: invoiceData.currency || 'EUR',
-    status: 'unpaid',
-    issueDate: new Date().toISOString().split('T')[0],
+    status: invoiceData.status || 'unpaid',
+    language: invoiceData.language || 'pt',
+    issueDate: invoiceData.issueDate || new Date().toISOString().split('T')[0],
     dueDate: invoiceData.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-    lineItems: [
-      {
-        id: `li-${Date.now()}`,
-        description: invoiceData.notes || (invoiceData.selectedPlanId ? `Subscription Plan Package: ${invoiceData.selectedPlanId}` : 'Manual Invoice'),
-        quantity: 1,
-        unitPrice: subtotal,
-        amount: subtotal
-      }
-    ],
-    notes: invoiceData.notes || 'Created via Super Admin Billing',
+    lineItems: invoiceData.lineItems && invoiceData.lineItems.length > 0 ? invoiceData.lineItems : [defaultLineItem],
+    notes: invoiceData.notes || 'Created via Billing & Payments',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

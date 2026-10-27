@@ -40,6 +40,10 @@ import { onRequestPost as supportCreateHandler } from "./functions/api/support/c
 import { onRequestPost as supportUpdateStatusHandler } from "./functions/api/support/update-status";
 import { onRequestGet as billingAdminStatsHandler } from "./functions/api/billing/admin-dashboard-stats";
 import { onRequestPost as billingCreateInvoiceHandler } from "./functions/api/billing/create-invoice";
+import { 
+  onRequestDelete as billingDeleteInvoiceHandler,
+  onRequestPost as billingDeleteInvoicePostHandler 
+} from "./functions/api/billing/delete-invoice";
 
 // Preserve existing environment secrets by setting override: false
 dotenv.config({ override: false });
@@ -139,6 +143,9 @@ async function startServer() {
   app.post('/api/billing/send-reminder', adaptFunction(billingSendReminderHandler));
   app.get('/api/billing/list-invoices', adaptFunction(billingListInvoicesHandler));
   app.post('/api/billing/create-invoice', adaptFunction(billingCreateInvoiceHandler));
+  app.delete('/api/billing/delete-invoice', adaptFunction(billingDeleteInvoiceHandler));
+  app.delete('/api/billing/invoices/:id', adaptFunction(billingDeleteInvoiceHandler));
+  app.post('/api/billing/delete-invoice', adaptFunction(billingDeleteInvoicePostHandler));
   app.get('/api/billing/admin-dashboard-stats', adaptFunction(billingAdminStatsHandler));
   app.post('/api/support/create', adaptFunction(supportCreateHandler));
   app.post('/api/support/update-status', adaptFunction(supportUpdateStatusHandler));

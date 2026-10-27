@@ -145,16 +145,27 @@ export async function getOrInitializeBilling(
     paymentMethods = [defaultPm];
   }
 
-  if (invoices.length === 0 && priceMonthly > 0) {
+  if (!existingSub && invoices.length === 0 && priceMonthly > 0) {
     const restMeta = await getRestaurantMeta(cleanId, env);
     const subtotal = subscription.currentPrice;
     const taxRate = 23;
     const taxAmount = Math.round(subtotal * 0.23 * 100) / 100;
     const total = Math.round((subtotal + taxAmount) * 100) / 100;
-    const invId = `inv-${cleanId}-initial`;
+    const cleanRestSlug = String(restMeta.name || cleanId)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\s\-]+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+    const currentMonthNum = String(currentMonth + 1).padStart(2, '0');
+    const currentYear2 = String(currentYear).slice(-2);
+    const invoiceNumberFormatted = `factura_${currentMonthNum}_${currentYear2}`;
+    const invId = `inv-${cleanId}-001`;
     const initialInvoice: Invoice = {
       id: invId,
-      invoiceNumber: `INV-${currentYear}-001`,
+      invoiceNumber: invoiceNumberFormatted,
       restaurantId: cleanId,
       restaurantName: restMeta.name,
       restaurantLegalName: restMeta.legalName,

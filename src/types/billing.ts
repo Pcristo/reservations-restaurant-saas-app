@@ -75,6 +75,7 @@ export interface Invoice {
   transactionReference?: string;     // e.g. "tx_dmp_1741289123"
   lineItems: InvoiceLineItem[];
   notes?: string;
+  language?: 'en' | 'pt';
   paymentInstructions?: {
     bankName: string;
     accountName: string;
