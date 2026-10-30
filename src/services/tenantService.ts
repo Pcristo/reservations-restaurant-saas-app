@@ -676,7 +676,12 @@ export async function updateRestaurant(
     updatedAt: now,
   };
 
-  await updateDoc(docRef, updatePayload);
+  try {
+    await setDoc(docRef, updatePayload, { merge: true });
+  } catch (err) {
+    console.warn('[TenantService] setDoc merge failed, trying updateDoc:', err);
+    await updateDoc(docRef, updatePayload);
+  }
 
   // Sync maintenanceModeEnabled to restaurant settings if modified
   if (data.maintenanceModeEnabled !== undefined) {
@@ -743,17 +748,21 @@ export async function updateRestaurant(
     console.warn(`[TenantService] Notice syncing restaurant to settings/${id}:`, syncErr);
   }
 
-  await logAuditAction({
-    restaurantId: id,
-    restaurantName: data.name,
-    userId: adminUser?.id || 'admin',
-    userName: adminUser?.name || 'Admin',
-    userEmail: adminUser?.email || '',
-    action: 'restaurant.update',
-    resource: `restaurants/${id}`,
-    details: { updatedFields: Object.keys(data) },
-    result: 'success',
-  });
+  try {
+    await logAuditAction({
+      restaurantId: id,
+      restaurantName: data.name,
+      userId: adminUser?.id || 'admin',
+      userName: adminUser?.name || 'Admin',
+      userEmail: adminUser?.email || '',
+      action: 'restaurant.update',
+      resource: `restaurants/${id}`,
+      details: { updatedFields: Object.keys(data) },
+      result: 'success',
+    });
+  } catch (auditErr) {
+    console.warn('[TenantService] Notice logging audit action:', auditErr);
+  }
 }
 
 export interface UpdateRestaurantAdminCredentialsInput {

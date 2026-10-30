@@ -412,24 +412,18 @@ export const RestaurantBrandingSettings: React.FC = () => {
         restaurantSlug={restaurantSlug}
         restaurantName={restaurantName}
         galleryAspectRatio={galleryAspectRatio}
-        onGalleryAspectRatioChange={async (ratio) => {
+        onGalleryAspectRatioChange={(ratio) => {
+          if (galleryAspectRatio === ratio) return;
           setGalleryAspectRatio(ratio);
-          try {
-            await updateSettings({ galleryAspectRatio: ratio });
-            toast.success(language === 'pt' ? 'Rácio atualizado!' : 'Aspect ratio updated!');
-          } catch {
-            toast.error('Failed to update aspect ratio');
-          }
+          updateSettings({ galleryAspectRatio: ratio }).catch(() => {});
+          toast.success(language === 'pt' ? 'Rácio atualizado!' : 'Aspect ratio updated!');
         }}
         showGalleryCaptions={showGalleryCaptions}
-        onShowGalleryCaptionsChange={async (show) => {
+        onShowGalleryCaptionsChange={(show) => {
+          if (showGalleryCaptions === show) return;
           setShowGalleryCaptions(show);
-          try {
-            await updateSettings({ showGalleryCaptions: show });
-            toast.success(language === 'pt' ? 'Definição de legendas atualizada!' : 'Caption setting updated!');
-          } catch {
-            toast.error('Failed to update caption setting');
-          }
+          updateSettings({ showGalleryCaptions: show }).catch(() => {});
+          toast.success(language === 'pt' ? 'Definição de legendas atualizada!' : 'Caption setting updated!');
         }}
       />
 

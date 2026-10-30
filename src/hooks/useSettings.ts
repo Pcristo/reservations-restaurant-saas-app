@@ -332,33 +332,6 @@ export function useSettings(restaurantIdOverride?: string) {
     // 1. Save to tenant-specific settings document
     await setDoc(doc(db, 'settings', targetRestaurantId), payload, { merge: true });
 
-    // 2. Also synchronize alternate identifier (slug or ID) if different, ensuring seamless cross-key resolution
-    if (activeRestaurant?.slug) {
-      const normSlug = normalizeTenantIdentifier(activeRestaurant.slug);
-      if (normSlug && normSlug !== targetRestaurantId) {
-        try {
-          await setDoc(doc(db, 'settings', normSlug), { ...payload, id: normSlug, restaurantId: normSlug }, { merge: true });
-        } catch (err) {}
-      }
-    }
-    if (activeRestaurant?.id) {
-      const normId = normalizeTenantIdentifier(activeRestaurant.id);
-      if (normId && normId !== targetRestaurantId) {
-        try {
-          await setDoc(doc(db, 'settings', normId), { ...payload, id: normId, restaurantId: normId }, { merge: true });
-        } catch (err) {}
-      }
-    }
-
-    // 3. For default restaurant, keep legacy settings/main synchronized
-    if (targetRestaurantId === DEFAULT_RESTAURANT_ID || targetRestaurantId === 'main') {
-      try {
-        await setDoc(doc(db, 'settings', 'main'), { ...payload, id: 'main' }, { merge: true });
-      } catch (err) {
-        console.warn('[useSettings] Synced legacy settings/main note:', err);
-      }
-    }
-
     // 4. Sync essential metadata to restaurants/{targetRestaurantId}
     try {
       const candidateRestIds = Array.from(new Set([

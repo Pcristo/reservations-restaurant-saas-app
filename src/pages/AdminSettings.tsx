@@ -877,12 +877,28 @@ export default function AdminSettings() {
             images={formData.galleryImages || []}
             onChange={(newImages) => {
               setFormData(prev => ({ ...prev, galleryImages: newImages }));
-              updateSettings({ ...formData, galleryImages: newImages });
+              updateSettings({ ...formData, galleryImages: newImages } as any);
             }}
             restaurantSlug={currentSlug || tenant?.slug || 'restaurant'}
             restaurantName={formData?.name || tenant?.name}
             theme={settings?.theme}
             customSettings={formData}
+            galleryAspectRatio={formData.galleryAspectRatio || '4:3'}
+            onGalleryAspectRatioChange={(ratio) => {
+              if (formData.galleryAspectRatio === ratio) return;
+              const updated = { ...formData, galleryAspectRatio: ratio };
+              setFormData(updated);
+              updateSettings(updated as any);
+              toast.success(language === 'pt' ? 'Rácio atualizado!' : 'Aspect ratio updated!');
+            }}
+            showGalleryCaptions={formData.showGalleryCaptions ?? true}
+            onShowGalleryCaptionsChange={(show) => {
+              if (formData.showGalleryCaptions === show) return;
+              const updated = { ...formData, showGalleryCaptions: show };
+              setFormData(updated);
+              updateSettings(updated as any);
+              toast.success(language === 'pt' ? 'Definição de legendas atualizada!' : 'Caption setting updated!');
+            }}
           />
         </div>
       )}

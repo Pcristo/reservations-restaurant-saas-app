@@ -14,7 +14,7 @@ import {
   getDisplayInvoiceNumber 
 } from '../features/billing/utils/invoicePdfGenerator';
 import { DEFAULT_PLANS } from '../data/plans';
-import { doc, deleteDoc, collection, getDocs, query, setDoc } from 'firebase/firestore';
+import { doc, deleteDoc, collection, getDocs, query, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 /**
@@ -313,28 +313,22 @@ export async function deleteInvoice(invoiceId: string, restaurantId?: string): P
     }
   }
 
-  // 2. Call API endpoint
-  let apiSuccess = false;
+  // 2. Try direct Firestore deletion via client SDK first
   try {
-    const res = await fetch(`/api/billing/delete-invoice?id=${encodeURIComponent(cleanId)}${restaurantId ? `&restaurantId=${encodeURIComponent(restaurantId)}` : ''}`, {
+    await deleteDoc(doc(db, 'invoices', cleanId));
+  } catch (dbErr) {
+    console.warn('[billingService] Direct client SDK delete failed, trying API:', dbErr);
+  }
+
+  // 3. Fallback: Call API endpoint
+  try {
+    await fetch(`/api/billing/delete-invoice?id=${encodeURIComponent(cleanId)}${restaurantId ? `&restaurantId=${encodeURIComponent(restaurantId)}` : ''}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: cleanId, restaurantId }),
     });
-    if (res.ok) {
-      apiSuccess = true;
-    }
   } catch (apiErr) {
     console.warn('[billingService] API delete invoice network error:', apiErr);
-  }
-
-  // 3. Fallback: Direct Firestore deletion if client has permission
-  try {
-    await deleteDoc(doc(db, 'invoices', cleanId));
-  } catch (dbErr) {
-    if (!apiSuccess) {
-      console.warn('[billingService] Direct Firestore delete failed:', dbErr);
-    }
   }
 }
 
@@ -419,13 +413,24 @@ export async function sendReminder(restaurantId: string, invoiceId: string): Pro
 }
 
 export async function markInvoicePaid(invoiceId: string): Promise<void> {
-  const res = await fetch(`/api/billing/mark-invoice-paid`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ invoiceId }),
-  });
-  if (!res.ok) {
-    throw new Error('Failed to mark invoice as paid');
+  const now = new Date().toISOString();
+  try {
+    const docRef = doc(db, 'invoices', invoiceId);
+    await updateDoc(docRef, {
+      status: 'paid',
+      paidAt: now,
+      updatedAt: now,
+    });
+  } catch (err) {
+    console.warn('[markInvoicePaid] Direct SDK failed, calling API:', err);
+    const res = await fetch(`/api/billing/mark-invoice-paid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiceId }),
+    });
+    if (!res.ok) {
+      throw new Error('Failed to mark invoice as paid');
+    }
   }
 }
 export async function listTransactions(): Promise<PaymentTransaction[]> {

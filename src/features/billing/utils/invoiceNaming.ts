@@ -36,18 +36,19 @@ export function sanitizeIdentifier(str: string): string {
 export function generateCleanInvoiceNumber(
   date?: string | Date,
   language?: 'en' | 'pt',
-  index?: number
+  index?: number,
+  appName?: string
 ): string {
+  const rawAppName = appName || APP_CONFIG.appName || 'DineMaster Pro';
+  const appSlug = rawAppName.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'dinemaster_pro';
+
   const d = date ? new Date(date) : new Date();
   const validD = isNaN(d.getTime()) ? new Date() : d;
   const month = String(validD.getMonth() + 1).padStart(2, '0');
   const year2 = String(validD.getFullYear()).slice(-2);
   const docWord = language === 'en' ? 'invoice' : 'factura';
-  let num = `${docWord}_${month}_${year2}`;
-  if (typeof index === 'number' && index > 1) {
-    num += `_${String(index).padStart(2, '0')}`;
-  }
-  return num;
+  const uniqueNum = typeof index === 'number' && index > 0 ? String(index) : String(Math.floor(10 + Math.random() * 90));
+  return `${appSlug}_${docWord}${uniqueNum}_${month}_${year2}`;
 }
 
 /**
@@ -59,85 +60,47 @@ export function generateCleanInvoiceNumber(
 export function getDisplayInvoiceNumber(
   invoiceNumber?: string,
   id?: string,
-  preferredLang?: 'en' | 'pt'
+  preferredLang?: 'en' | 'pt',
+  appName?: string
 ): string {
   const raw = String(invoiceNumber || id || '').trim();
+  const rawAppName = appName || APP_CONFIG.appName || 'DineMaster Pro';
+  const appSlug = rawAppName.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'dinemaster_pro';
+
   const now = new Date();
   const defaultMonth = String(now.getMonth() + 1).padStart(2, '0');
   const defaultYear2 = String(now.getFullYear()).slice(-2);
 
   const isEn = preferredLang === 'en';
+  const docWord = isEn ? 'invoice' : 'factura';
 
   if (!raw) {
-    return isEn ? `invoice_${defaultMonth}_${defaultYear2}` : `factura_${defaultMonth}_${defaultYear2}`;
+    return `${appSlug}_${docWord}42_${defaultMonth}_${defaultYear2}`;
   }
 
+  // If already matches appSlug_docWord...
   const lower = raw.toLowerCase();
-
-  // If preferredLang is explicitly provided, adhere to: if 'en' then invoice, otherwise factura
-  if (preferredLang) {
-    const docWord = isEn ? 'invoice' : 'factura';
-    const exactMatch = lower.match(/^(?:invoice|factura)_(\d{2})_(\d{2})(_\d+)?$/i);
-    if (exactMatch) {
-      return `${docWord}_${exactMatch[1]}_${exactMatch[2]}${exactMatch[3] || ''}`;
-    }
-  } else {
-    // If no preferredLang given:
-    // If string is already invoice_MM_YY, return it; if factura_MM_YY, return it
-    if (/^invoice_\d{2}_\d{2}(_\d+)?$/i.test(lower)) {
-      return lower;
-    }
-    if (/^factura_\d{2}_\d{2}(_\d+)?$/i.test(lower)) {
-      return lower;
-    }
+  if (lower.startsWith(`${appSlug}_`)) {
+    return raw;
   }
 
-  // Determine doc word: if en -> invoice, otherwise -> factura
-  let docWord = 'factura';
-  if (preferredLang) {
-    docWord = preferredLang === 'en' ? 'invoice' : 'factura';
-  } else if (lower.endsWith('_en') || lower.includes('_en_') || (lower.includes('_invoice_') && !lower.includes('_pt'))) {
-    docWord = 'invoice';
-  } else {
-    docWord = 'factura';
+  // If matches docWord or invoice/factura with unique number
+  const matchNum = lower.match(/(?:invoice|factura)(\d*)[_\-](\d{2})[_\-](\d{2})/i);
+  if (matchNum) {
+    const num = matchNum[1] || '42';
+    const month = matchNum[2];
+    const year = matchNum[3];
+    return `${appSlug}_${docWord}${num}_${month}_${year}`;
   }
 
-  // If it's a long filename string like dinemaster_pro_invoice_bela_italia_10_26_en or dinemaster_pro_factura_bela_italia_10_26_pt
-  if (lower.includes('_invoice_') || lower.includes('_factura_')) {
-    const parts = lower.split('_');
-    const digits = parts.filter(p => /^\d{2,4}$/.test(p));
-    if (digits.length >= 2) {
-      const rawYear = digits[digits.length - 1];
-      const rawMonth = digits[digits.length - 2];
-      const year2 = rawYear.length === 4 ? rawYear.slice(-2) : rawYear.padStart(2, '0');
-      const month = String(parseInt(rawMonth, 10)).padStart(2, '0');
-      return `${docWord}_${month}_${year2}`;
-    }
+  const matchSimple = lower.match(/(?:invoice|factura)[_\-](\d{2})[_\-](\d{2})/i);
+  if (matchSimple) {
+    const month = matchSimple[1];
+    const year = matchSimple[2];
+    return `${appSlug}_${docWord}42_${month}_${year}`;
   }
 
-  // If it's INV-2026-001 or INV-2026-10 or similar
-  if (lower.startsWith('inv-')) {
-    const parts = lower.split('-');
-    const yearPart = parts[1];
-    const monthPart = parts[2];
-    const year2 = yearPart && yearPart.length >= 2 ? yearPart.slice(-2) : defaultYear2;
-    let month = defaultMonth;
-    if (monthPart && /^\d{1,2}$/.test(monthPart)) {
-      const parsedMonth = parseInt(monthPart, 10);
-      if (parsedMonth >= 1 && parsedMonth <= 12) {
-        month = String(parsedMonth).padStart(2, '0');
-      }
-    }
-    return `${docWord}_${month}_${year2}`;
-  }
-
-  // If it has digits matching MM_YY or MM-YY
-  const match = lower.match(/(\d{2})[_\-](\d{2})/);
-  if (match) {
-    return `${docWord}_${match[1]}_${match[2]}`;
-  }
-
-  return `${docWord}_${defaultMonth}_${defaultYear2}`;
+  return `${appSlug}_${docWord}42_${defaultMonth}_${defaultYear2}`;
 }
 
 /**

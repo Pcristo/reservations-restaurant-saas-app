@@ -136,7 +136,6 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
     const resolvedTitle = language === 'pt' ? (newTitlePt.trim() || newTitleEn.trim() || 'Foto do Restaurante') : (newTitleEn.trim() || newTitlePt.trim() || 'Restaurant Photo');
 
     if (editingImageId) {
-      // Update existing image
       const updated = images.map(img => img.id === editingImageId ? {
         ...img,
         url: newUrl.trim(),
@@ -147,7 +146,6 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
       onChange(updated);
       toast.success(language === 'pt' ? 'Imagem atualizada com sucesso!' : 'Image updated successfully!');
     } else {
-      // Add new image
       const newImg: RestaurantGalleryImage = {
         id: `img-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
         url: newUrl.trim(),
@@ -209,25 +207,26 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
 
         {/* Aspect Ratio & Caption Toggles */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Aspect Ratio Toggle */}
+          {/* Aspect Ratio Toggle (Interactive Segmented Switch) */}
           <div className={cn(
-            "flex items-center gap-1 p-1 rounded-xl border text-xs",
-            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-50 border-gray-300 text-gray-700"
+            "flex items-center gap-1 p-1 rounded-xl border text-xs shadow-xs",
+            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-100 border-gray-300 text-gray-700"
           )}>
-            <span className="text-[10px] font-semibold px-2 text-gray-400 uppercase">
+            <span className="text-[10px] font-bold px-2 text-gray-400 uppercase tracking-wider">
               {language === 'pt' ? 'Rácio:' : 'Ratio:'}
             </span>
             <button
               type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 onGalleryAspectRatioChange?.('4:3');
               }}
               className={cn(
-                "px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer pointer-events-auto",
+                "px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer",
                 galleryAspectRatio === '4:3'
-                  ? "bg-amber-500 text-slate-950 shadow-xs"
-                  : "hover:bg-gray-200 dark:hover:bg-gray-800"
+                  ? "bg-amber-500 text-slate-950 shadow-md font-extrabold"
+                  : "hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
               )}
             >
               4:3
@@ -235,42 +234,44 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             <button
               type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 onGalleryAspectRatioChange?.('16:9');
               }}
               className={cn(
-                "px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer pointer-events-auto",
+                "px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer",
                 galleryAspectRatio === '16:9'
-                  ? "bg-amber-500 text-slate-950 shadow-xs"
-                  : "hover:bg-gray-200 dark:hover:bg-gray-800"
+                  ? "bg-amber-500 text-slate-950 shadow-md font-extrabold"
+                  : "hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
               )}
             >
               16:9
             </button>
           </div>
 
-          {/* Show Captions Toggle */}
+          {/* Show Captions Toggle (Interactive Slide Switch) */}
           <div className={cn(
-            "flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs",
-            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-50 border-gray-300 text-gray-700"
+            "flex items-center gap-2.5 px-3 py-1.5 rounded-xl border text-xs shadow-xs",
+            isDark ? "bg-gray-900 border-gray-700 text-gray-300" : "bg-gray-100 border-gray-300 text-gray-700"
           )}>
-            <span className="text-[10px] font-semibold uppercase text-gray-400">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
               {language === 'pt' ? 'Legenda' : 'Caption'}
             </span>
             <button
               type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 onShowGalleryCaptionsChange?.(!showGalleryCaptions);
               }}
               className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none pointer-events-auto",
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner",
                 showGalleryCaptions ? "bg-amber-500" : (isDark ? "bg-gray-700" : "bg-gray-300")
               )}
             >
               <span className={cn(
-                "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out",
-                showGalleryCaptions ? "translate-x-4" : "translate-x-0"
+                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
+                showGalleryCaptions ? "translate-x-5" : "translate-x-0"
               )} />
             </button>
           </div>
@@ -280,7 +281,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
             type="button"
             onClick={handleOpenAddUrl}
             className={cn(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border",
+              "px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border shadow-xs",
               isAddingUrl && !editingImageId
                 ? "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600"
                 : isDark
@@ -330,7 +331,7 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
         </div>
       </div>
 
-      {/* Add / Edit via URL Form Expandable */}
+      {/* Add / Edit via URL Form Expandable with Smooth Animation */}
       <AnimatePresence>
         {isAddingUrl && (
           <motion.form 
@@ -344,100 +345,100 @@ export const RestaurantGalleryManager: React.FC<RestaurantGalleryManagerProps> =
               isDark ? "bg-gray-900/90 border-gray-700" : "bg-gray-50 border-gray-200"
             )}
           >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5 uppercase tracking-wider">
-              <Plus size={13} />
-              {editingImageId 
-                ? (language === 'pt' ? 'Editar Imagem via URL' : 'Edit Image via URL')
-                : (language === 'pt' ? 'Adicionar Imagem via URL' : 'Add Image from URL')
-              }
-            </span>
-            <button
-              type="button"
-              onClick={() => { setIsAddingUrl(false); setEditingImageId(null); }}
-              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
-            >
-              {language === 'pt' ? 'Cancelar' : 'Cancel'}
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                {language === 'pt' ? 'URL da Imagem *' : 'Image URL *'}
-              </label>
-              <input
-                type="url"
-                required
-                value={newUrl}
-                onChange={(e) => setNewUrl(e.target.value)}
-                placeholder="https://images.unsplash.com/photo-..."
-                className={cn(
-                  "w-full px-3 py-1.5 text-xs rounded-lg border font-mono outline-none focus:ring-2 focus:ring-amber-500",
-                  isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
-                )}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  {language === 'pt' ? 'Legenda (PT)' : 'Caption (PT)'}
-                </label>
-                <input
-                  type="text"
-                  value={newTitlePt}
-                  onChange={(e) => setNewTitlePt(e.target.value)}
-                  placeholder="ex. Sala Principal"
-                  className={cn(
-                    "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
-                    isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
-                  )}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  {language === 'pt' ? 'Legenda (ENG)' : 'Caption (ENG)'}
-                </label>
-                <input
-                  type="text"
-                  value={newTitleEn}
-                  onChange={(e) => setNewTitleEn(e.target.value)}
-                  placeholder="e.g. Main Dining Room"
-                  className={cn(
-                    "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
-                    isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
-                  )}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            {editingImageId && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5 uppercase tracking-wider">
+                <Plus size={13} />
+                {editingImageId 
+                  ? (language === 'pt' ? 'Editar Imagem via URL' : 'Edit Image via URL')
+                  : (language === 'pt' ? 'Adicionar Imagem via URL' : 'Add Image from URL')
+                }
+              </span>
               <button
                 type="button"
-                onClick={() => {
-                  handleRemoveImage(editingImageId);
-                  setIsAddingUrl(false);
-                  setEditingImageId(null);
-                }}
-                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold text-xs rounded-lg transition-colors cursor-pointer border border-rose-500/30"
+                onClick={() => { setIsAddingUrl(false); setEditingImageId(null); }}
+                className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
               >
-                {language === 'pt' ? 'Eliminar' : 'Delete'}
+                {language === 'pt' ? 'Cancelar' : 'Cancel'}
               </button>
-            )}
-            <button
-              type="submit"
-              className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors cursor-pointer"
-            >
-              {editingImageId 
-                ? (language === 'pt' ? 'Atualizar Imagem' : 'Update Image')
-                : (language === 'pt' ? 'Adicionar à Galeria' : 'Add to Gallery')
-              }
-            </button>
-          </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  {language === 'pt' ? 'URL da Imagem *' : 'Image URL *'}
+                </label>
+                <input
+                  type="url"
+                  required
+                  value={newUrl}
+                  onChange={(e) => setNewUrl(e.target.value)}
+                  placeholder="https://images.unsplash.com/photo-..."
+                  className={cn(
+                    "w-full px-3 py-1.5 text-xs rounded-lg border font-mono outline-none focus:ring-2 focus:ring-amber-500",
+                    isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                    {language === 'pt' ? 'Legenda (PT)' : 'Caption (PT)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newTitlePt}
+                    onChange={(e) => setNewTitlePt(e.target.value)}
+                    placeholder="ex. Sala Principal"
+                    className={cn(
+                      "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
+                      isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                    )}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                    {language === 'pt' ? 'Legenda (ENG)' : 'Caption (ENG)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newTitleEn}
+                    onChange={(e) => setNewTitleEn(e.target.value)}
+                    placeholder="e.g. Main Dining Room"
+                    className={cn(
+                      "w-full px-3 py-1.5 text-xs rounded-lg border outline-none focus:ring-2 focus:ring-amber-500",
+                      isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                    )}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              {editingImageId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRemoveImage(editingImageId);
+                    setIsAddingUrl(false);
+                    setEditingImageId(null);
+                  }}
+                  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold text-xs rounded-lg transition-colors cursor-pointer border border-rose-500/30"
+                >
+                  {language === 'pt' ? 'Eliminar' : 'Delete'}
+                </button>
+              )}
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors cursor-pointer"
+              >
+                {editingImageId 
+                  ? (language === 'pt' ? 'Atualizar Imagem' : 'Update Image')
+                  : (language === 'pt' ? 'Adicionar à Galeria' : 'Add to Gallery')
+                }
+              </button>
+            </div>
           </motion.form>
         )}
       </AnimatePresence>

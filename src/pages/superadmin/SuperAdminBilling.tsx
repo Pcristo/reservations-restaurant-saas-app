@@ -114,7 +114,10 @@ export const SuperAdminBilling: React.FC = () => {
       return;
     }
     const targetRest = restaurants.find(r => r.id === newInvRestaurantId);
-    const generatedInvoiceNumber = generateCleanInvoiceNumber(new Date(), newInvLanguage);
+    const baseNumber = generateCleanInvoiceNumber(new Date(), newInvLanguage);
+    const existingCount = allInvoices.filter(i => (i.invoiceNumber || i.id || '').startsWith(baseNumber)).length;
+    const generatedInvoiceNumber = existingCount > 0 ? `${baseNumber}_${Date.now().toString().slice(-4)}` : baseNumber;
+
     setIsCreatingInvoice(true);
     try {
       await createManualInvoice({
@@ -1076,7 +1079,19 @@ export const SuperAdminBilling: React.FC = () => {
                 <label className="block text-slate-400 mb-1 font-medium">Select Restaurant</label>
                 <select
                   value={newInvRestaurantId}
-                  onChange={(e) => setNewInvRestaurantId(e.target.value)}
+                  onChange={(e) => {
+                    const restId = e.target.value;
+                    setNewInvRestaurantId(restId);
+                    const targetRest = restaurants.find(r => r.id === restId);
+                    if (targetRest && targetRest.planId) {
+                      setSelectedPackageId(targetRest.planId);
+                      const foundPlan = DEFAULT_PLANS.find(p => p.id === targetRest.planId);
+                      if (foundPlan) {
+                        setNewInvAmount(foundPlan.priceMonthly);
+                        setNewInvNotes(`Subscription Package: ${foundPlan.name} (${formatCurrency(foundPlan.priceMonthly, foundPlan.currency)} / month)`);
+                      }
+                    }
+                  }}
                   className="w-full bg-slate-800 text-white p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
                 >
                   <option value="">-- Choose Restaurant --</option>
